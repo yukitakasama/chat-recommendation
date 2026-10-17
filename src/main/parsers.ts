@@ -244,7 +244,124 @@ function pick(record: Record<string, unknown>, keys: string[]): unknown {
   return undefined
 }
 
-function parseStructuredRows(rows: unknown[], friendName: string, sourceName: string): ParsedConversation {
+interface StructuredSender {
+  name: string
+  uin: string
+  uid: string
+}
+
+interface JsonChatIdentity {
+  selfUins: Set<string>
+  selfUids: Set<string>
+  selfNames: Set<string>
+  peerUins: Set<string>
+  peerUids: Set<string>
+  peerNames: Set<string>
+}
+
+function emptyChatIdentity(): JsonChatIdentity {
+  return {
+    selfUins: new Set(),
+    selfUids: new Set(),
+    selfNames: new Set(),
+    peerUins: new Set(),
+    peerUids: new Set(),
+    peerNames: new Set()
+  }
+}
+
+function identityValue(value: unknown): string {
+  if (typeof value !== 'string' && typeof value !== 'number') return ''
+  return String(value).trim()
+}
+
+function identityValues(values: unknown[]): Set<string> {
+  return new Set(values.map(identityValue).filter(Boolean))
+}
+
+function identityNames(values: unknown[]): Set<string> {
+  return new Set(
+    values
+      .map((value) => normalizeSender(identityValue(value)).toLowerCase())
+      .filter(Boolean)
+  )
+}
+
+function extractChatIdentity(data: unknown): JsonChatIdentity {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return emptyChatIdentity()
+  const root = data as Record<string, unknown>
+  const chatInfoValue = pick(root, ['chatInfo', 'chat_info'])
+  if (!chatInfoValue || typeof chatInfoValue !== 'object' || Array.isArray(chatInfoValue)) {
+    return emptyChatIdentity()
+  }
+  const chatInfo = chatInfoValue as Record<string, unknown>
+  const chatType = identityValue(pick(chatInfo, ['type', 'chatType'])).toLowerCase()
+  const peerName = pick(chatInfo, ['peerName', 'friendName', 'contactName'])
+  const privateChatName =
+    chatType === '' || chatType === 'private' || chatType === 'friend'
+      ? pick(chatInfo, ['name', 'title'])
+      : undefined
+
+  return {
+    selfUins: identityValues([pick(chatInfo, ['selfUin', 'selfQQ', 'myUin', 'myQQ'])]),
+    selfUids: identityValues([pick(chatInfo, ['selfUid', 'myUid'])]),
+    selfNames: identityNames([pick(chatInfo, ['selfName', 'selfNickname', 'myName'])]),
+    peerUins: identityValues([pick(chatInfo, ['peerUin', 'peerQQ', 'friendUin', 'friendQQ'])]),
+    peerUids: identityValues([pick(chatInfo, ['peerUid', 'friendUid'])]),
+    peerNames: identityNames([peerName, privateChatName])
+  }
+}
+
+function extractStructuredSender(
+  rawSender: unknown,
+  record: Record<string, unknown>
+): StructuredSender {
+  const directUin = pick(record, ['senderUin', 'senderQQ', 'senderId', 'uin', 'qq'])
+  const directUid = pick(record, ['senderUid', 'uid'])
+
+  if (rawSender && typeof rawSender === 'object' && !Array.isArray(rawSender)) {
+    const sender = rawSender as Record<string, unknown>
+    return {
+      name: normalizeSender(
+        pick(sender, ['name', 'nickname', 'remark', 'displayName', 'senderName']) ??
+          pick(sender, ['uin', 'uid'])
+      ),
+      uin: identityValue(
+        pick(sender, ['uin', 'senderUin', 'senderQQ', 'qq', 'qqNumber']) ?? directUin
+      ),
+      uid: identityValue(pick(sender, ['uid', 'senderUid']) ?? directUid)
+    }
+  }
+
+  return {
+    name: normalizeSender(rawSender),
+    uin: identityValue(directUin),
+    uid: identityValue(directUid)
+  }
+}
+
+function roleForStructuredSender(
+  sender: StructuredSender,
+  friendName: string,
+  identity: JsonChatIdentity
+): MessageInput['senderRole'] {
+  if (sender.uin && identity.selfUins.has(sender.uin)) return 'self'
+  if (sender.uid && identity.selfUids.has(sender.uid)) return 'self'
+  if (sender.uin && identity.peerUins.has(sender.uin)) return 'other'
+  if (sender.uid && identity.peerUids.has(sender.uid)) return 'other'
+
+  const name = sender.name.toLowerCase()
+  if (name && identity.selfNames.has(name)) return 'self'
+  if (name && identity.peerNames.has(name)) return 'other'
+  return roleForSender(sender.name || sender.uin || sender.uid, friendName)
+}
+
+function parseStructuredRows(
+  rows: unknown[],
+  friendName: string,
+  sourceName: string,
+  identity: JsonChatIdentity = emptyChatIdentity()
+): ParsedConversation {
   const messages: MessageInput[] = []
   const warnings: string[] = []
   for (const item of rows) {
@@ -282,10 +399,28 @@ function parseStructuredRows(rows: unknown[], friendName: string, sourceName: st
     const rawRole = pick(record, ['senderRole', 'role', 'isSelf', 'fromSelf', 'is_self'])
     const text = fmtValue(rawText).trim()
     if (!text && !rawTime && !rawSender) continue
-    const sender = normalizeSender(rawSender) || (rawRole === 'self' || rawRole === true ? '我' : friendName)
-    let role = roleForSender(sender, friendName)
-    if (rawRole === 'self' || rawRole === true || rawRole === 1 || rawRole === '我') role = 'self'
-    if (rawRole === 'other' || rawRole === false || rawRole === 0) role = 'other'
+    const senderInfo = extractStructuredSender(rawSender, record)
+    let role = roleForStructuredSender(senderInfo, friendName, identity)
+    if (
+      record.system === true ||
+      identityValue(pick(record, ['type', 'messageType'])).toLowerCase() === 'system'
+    ) {
+      role = 'system'
+    } else if (role === 'unknown') {
+      if (rawRole === 'self' || rawRole === true || rawRole === 1 || rawRole === '我') {
+        role = 'self'
+      }
+      if (rawRole === 'other' || rawRole === false || rawRole === 0) role = 'other'
+    }
+    const sender =
+      senderInfo.name ||
+      (role === 'self'
+        ? '我'
+        : role === 'other'
+          ? friendName
+          : role === 'system'
+            ? 'QQ系统'
+            : '未知发送者')
     messages.push({
       tempId: stableId(),
       seq: messages.length,
@@ -315,7 +450,9 @@ export function parseJsonConversation(source: string, friendName: string, source
   }
   if (Array.isArray(data)) return parseStructuredRows(data, friendName, sourceName)
   const rows = findMessageArray(data)
-  if (rows) return parseStructuredRows(rows, friendName, sourceName)
+  if (rows) {
+    return parseStructuredRows(rows, friendName, sourceName, extractChatIdentity(data))
+  }
   return {
     messages: [],
     warnings: [`${sourceName} 的 JSON 结构未知，未找到消息数组。`],

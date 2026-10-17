@@ -74,6 +74,58 @@ describe('chat parsers', () => {
     expect(csv.messages).toHaveLength(2)
   })
 
+  it('uses QQChatExporter chatInfo IDs to distinguish object senders', () => {
+    const parsed = parseJsonConversation(
+      JSON.stringify({
+        chatInfo: {
+          type: 'private',
+          name: '轻羽 axi',
+          selfUin: '1152941452',
+          selfUid: 'u_self',
+          selfName: '四月Aph',
+          peerUin: '3783193621',
+          peerUid: 'u_peer'
+        },
+        messages: [
+          {
+            timestamp: 1760690000000,
+            type: 'text',
+            system: false,
+            sender: {
+              uid: 'u_peer',
+              name: '轻羽 axi',
+              nickname: '轻羽'
+            },
+            content: {
+              text: '对方消息'
+            }
+          },
+          {
+            timestamp: 1760690001000,
+            type: 'text',
+            system: false,
+            sender: {
+              uin: '1152941452',
+              name: '四月Aph'
+            },
+            content: {
+              text: '本人消息'
+            }
+          }
+        ]
+      }),
+      '好友备注',
+      'qq-chat-exporter.json'
+    )
+
+    expect(parsed.messages).toHaveLength(2)
+    expect(parsed.messages[0]?.senderRole).toBe('other')
+    expect(parsed.messages[0]?.senderName).toBe('轻羽 axi')
+    expect(parsed.messages[1]?.senderRole).toBe('self')
+    expect(parsed.messages[1]?.senderName).toBe('四月Aph')
+    expect(parsed.warnings.some((warning) => warning.includes('无法判断'))).toBe(false)
+  })
+
   it('finds nested JSON message arrays and converts epoch timestamps', () => {
     const parsed = parseJsonConversation(
       JSON.stringify({
