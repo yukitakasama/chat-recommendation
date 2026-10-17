@@ -6,13 +6,15 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const oldInstaller = path.resolve(
-  process.argv[2] || path.join('release', 'ChatInsight-1.2.0-x64.exe')
+  process.argv[2] || path.join('release', 'ChatInsight-1.3.0-x64.exe')
 )
 const newInstaller = path.resolve(
-  process.argv[3] || path.join('release', 'ChatInsight-1.3.0-x64.exe')
+  process.argv[3] || path.join('release', 'ChatInsight-1.3.1-x64.exe')
 )
 const password = 'UpgradePreservation123'
+const recoveredPassword = 'UpgradeRecovered456'
 const syntheticApiKey = 'upgrade-test-placeholder-key'
+const importedMessage = '升级前写入的聊天记录必须在 v1.3.1 中保持不变'
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -47,11 +49,22 @@ async function openApp(executablePath) {
   return { electronApp, page: await electronApp.firstWindow() }
 }
 
-async function createVaultAndCredential(page) {
+async function createVaultData(page, importPath) {
   return page.evaluate(
-    async ({ vaultPassword, apiKey }) => {
-      await window.api.vault.create(vaultPassword)
-      return window.api.providers.save({
+    async ({ vaultPassword, apiKey, fixturePath }) => {
+      const vault = await window.api.vault.create(vaultPassword)
+      const friend = await window.api.friends.save({
+        displayName: '升级数据验证好友',
+        notes: ''
+      })
+      const preview = await window.api.imports.preview(friend.id, [fixturePath])
+      const committed = await window.api.imports.commit({
+        previewId: preview.id,
+        friendId: friend.id,
+        action: 'copy',
+        messages: preview.messages
+      })
+      const provider = await window.api.providers.save({
         name: 'Upgrade preservation check',
         protocol: 'chat_completions',
         baseUrl: 'https://example.invalid/v1',
@@ -60,26 +73,73 @@ async function createVaultAndCredential(page) {
         visionModel: '',
         isDefault: true
       })
+      const messages = await window.api.messages.list(friend.id)
+      return {
+        recoveryCode: vault.recoveryCode,
+        friendId: friend.id,
+        providerId: provider.id,
+        importedMessages: committed.importedMessages,
+        messageTexts: messages.map((message) => message.text)
+      }
     },
-    { vaultPassword: password, apiKey: syntheticApiKey }
+    { vaultPassword: password, apiKey: syntheticApiKey, fixturePath: importPath }
   )
 }
 
-async function unlockAndReadCredential(page) {
+async function unlockAndReadData(page, friendId, providerId) {
   return page.evaluate(
-    async (vaultPassword) => {
+    async ({ vaultPassword, targetFriendId, targetProviderId }) => {
       await window.api.vault.unlock(vaultPassword)
       const state = await window.api.app.getState()
       const providers = await window.api.providers.list()
-      return { state, providers }
+      const friends = await window.api.friends.list()
+      const messages = await window.api.messages.list(targetFriendId)
+      return {
+        state,
+        provider: providers.find((provider) => provider.id === targetProviderId),
+        friend: friends.find((friend) => friend.id === targetFriendId),
+        messageCount: messages.length,
+        messageTexts: messages.map((message) => message.text)
+      }
     },
-    password
+    { vaultPassword: password, targetFriendId: friendId, targetProviderId: providerId }
+  )
+}
+
+async function recoverAndReadData(page, recoveryCode, friendId, providerId) {
+  return page.evaluate(
+    async ({ code, newPassword, targetFriendId, targetProviderId }) => {
+      await window.api.vault.recover(code, newPassword)
+      const state = await window.api.app.getState()
+      const providers = await window.api.providers.list()
+      const friends = await window.api.friends.list()
+      const messages = await window.api.messages.list(targetFriendId)
+      return {
+        state,
+        provider: providers.find((provider) => provider.id === targetProviderId),
+        friend: friends.find((friend) => friend.id === targetFriendId),
+        messageCount: messages.length,
+        messageTexts: messages.map((message) => message.text)
+      }
+    },
+    {
+      code: recoveryCode,
+      newPassword: recoveredPassword,
+      targetFriendId: friendId,
+      targetProviderId: providerId
+    }
   )
 }
 
 async function main() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'chatinsight-upgrade-test-'))
   const installDir = path.join(tempRoot, 'ChatInsight')
+  const importPath = path.join(tempRoot, 'upgrade-import.txt')
+  fs.writeFileSync(
+    importPath,
+    `2026-01-02 10:00:00 升级数据验证好友: ${importedMessage}\n2026-01-02 10:01:00 我: 收到，升级后核对。`,
+    'utf8'
+  )
   let appHandle
   try {
     install(oldInstaller, installDir)
@@ -87,7 +147,13 @@ async function main() {
     assert(fs.existsSync(executable), 'Old application executable was not installed')
 
     appHandle = await openApp(executable)
-    const provider = await createVaultAndCredential(appHandle.page)
+    const created = await createVaultData(appHandle.page, importPath)
+    assert(created.recoveryCode.startsWith('CI-'), 'Recovery code was not created')
+    assert(created.importedMessages === 2, 'Initial chat import did not contain two messages')
+    assert(
+      created.messageTexts.some((message) => message.includes(importedMessage)),
+      'Initial chat import did not persist the expected message'
+    )
     await appHandle.electronApp.close()
     appHandle = undefined
 
@@ -110,14 +176,36 @@ async function main() {
     )
 
     appHandle = await openApp(executable)
-    const restored = await unlockAndReadCredential(appHandle.page)
-    assert(restored.state.version === '1.3.0', 'Updated application version is not 1.3.0')
-    const savedProvider = restored.providers.find((item) => item.id === provider.id)
-    assert(savedProvider, 'Provider credential record was lost during the update')
-    assert(savedProvider.hasApiKey, 'Provider API key was lost during the update')
+    const restored = await unlockAndReadData(appHandle.page, created.friendId, created.providerId)
+    assert(restored.state.version === '1.3.1', 'Updated application version is not 1.3.1')
+    assert(restored.friend, 'Imported friend was lost during the update')
+    assert(restored.messageCount === 2, 'Imported chat messages were lost during the update')
+    assert(
+      restored.messageTexts.some((message) => message.includes(importedMessage)),
+      'Imported chat content changed during the update'
+    )
+    assert(restored.provider, 'Provider credential record was lost during the update')
+    assert(restored.provider.hasApiKey, 'Provider API key was lost during the update')
+
+    await appHandle.electronApp.close()
+    appHandle = await openApp(executable)
+    const recovered = await recoverAndReadData(
+      appHandle.page,
+      created.recoveryCode,
+      created.friendId,
+      created.providerId
+    )
+    assert(recovered.state.version === '1.3.1', 'Recovered application version is not 1.3.1')
+    assert(recovered.friend, 'Recovery code could not access the imported friend')
+    assert(recovered.messageCount === 2, 'Recovery code could not access imported messages')
+    assert(
+      recovered.messageTexts.some((message) => message.includes(importedMessage)),
+      'Recovery code produced changed chat data'
+    )
+    assert(recovered.provider?.hasApiKey, 'Recovery code could not access the saved credential')
 
     process.stdout.write(
-      `Upgrade preservation passed: password material retained, provider ${provider.id} retained, version ${restored.state.version}.\n`
+      'Upgrade preservation passed: imported messages, privacy password, recovery code, and API credential retained in v1.3.1.\n'
     )
   } finally {
     if (appHandle) await appHandle.electronApp.close()

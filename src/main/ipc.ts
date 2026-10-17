@@ -119,6 +119,43 @@ function renderRunMarkdown(run: AnalysisRun): string {
       lines.push('')
     }
   }
+  if (result.supplementalAnswer) {
+    lines.push(
+      '',
+      '## 补充提问',
+      result.supplementalAnswer.question
+        .split('\n')
+        .map((line) => `> ${line}`)
+        .join('\n')
+    )
+    if (result.supplementalAnswer.status === 'answered') {
+      lines.push('', result.supplementalAnswer.answer)
+      if (result.supplementalAnswer.evidence.length) {
+        lines.push(
+          '',
+          '### 补充回答证据',
+          ...result.supplementalAnswer.evidence.map(
+            (item) =>
+              `- ${item.quote ? `“${item.quote}” ` : ''}${item.reason ?? '支持补充回答'}${
+                item.messageId ? `（消息 ${item.messageId}）` : ''
+              }${item.assetId ? `（图片 ${item.assetId}）` : ''}`
+          )
+        )
+      }
+      if (result.supplementalAnswer.uncertainty.length) {
+        lines.push(
+          '',
+          '### 补充回答不确定性',
+          ...result.supplementalAnswer.uncertainty.map((item) => `- ${item}`)
+        )
+      }
+    } else {
+      lines.push(
+        '',
+        result.supplementalAnswer.error ?? '补充问题未能生成有效回答，默认分析结果已保留。'
+      )
+    }
+  }
   if (result.styleBasis) {
     lines.push(
       '## 风格依据',

@@ -34,6 +34,20 @@ export const TopicCandidateSchema = z.object({
   risk: RiskLevelSchema
 })
 
+export const SupplementalAnswerResultSchema = z
+  .object({
+    question: z.string().min(1).max(2000),
+    status: z.enum(['answered', 'failed']),
+    answer: z.string().max(12_000).default(''),
+    evidence: z.array(EvidenceRefSchema).max(12).default([]),
+    uncertainty: z.array(z.string().max(1000)).max(8).default([]),
+    error: z.string().max(1000).optional()
+  })
+  .refine((value) => value.status !== 'answered' || Boolean(value.answer.trim()), {
+    message: '已完成的补充回答不能为空',
+    path: ['answer']
+  })
+
 export const LoveAnalysisResultSchema = z.object({
   kind: z.literal('love'),
   generatedAt: z.string(),
@@ -59,6 +73,7 @@ export const LoveAnalysisResultSchema = z.object({
       message: '至少需要一条低风险回复'
     }),
   styleBasis: StyleBasisSchema.optional(),
+  supplementalAnswer: SupplementalAnswerResultSchema.optional(),
   warnings: z.array(z.string()).default([])
 })
 
@@ -85,6 +100,7 @@ export const WorkAnalysisResultSchema = z.object({
       message: '至少需要一条低风险回复'
     }),
   styleBasis: StyleBasisSchema.optional(),
+  supplementalAnswer: SupplementalAnswerResultSchema.optional(),
   warnings: z.array(z.string()).default([])
 })
 
@@ -107,6 +123,7 @@ export const CustomAnalysisResultSchema = z.object({
   summary: z.string().default(''),
   sections: z.array(CustomSectionResultSchema),
   styleBasis: StyleBasisSchema.optional(),
+  supplementalAnswer: SupplementalAnswerResultSchema.optional(),
   warnings: z.array(z.string()).default([])
 })
 
@@ -299,6 +316,7 @@ export const AnalysisPreflightInputSchema = z.object({
   providerId: z.string().min(1),
   includeImages: z.boolean().default(false),
   includeFiles: z.boolean().default(false),
+  supplementalQuestion: z.string().trim().max(2000).default(''),
   scope: AnalysisScopeSchema
 })
 
@@ -315,6 +333,7 @@ export const AnalysisPreflightSchema = z.object({
   estimatedRequests: z.number().int(),
   includesImages: z.boolean(),
   includesFiles: z.boolean(),
+  supplementalQuestion: z.string().max(2000),
   warnings: z.array(z.string())
 })
 
@@ -390,6 +409,7 @@ export type EvidenceRef = z.infer<typeof EvidenceRefSchema>
 export type StyleBasis = z.infer<typeof StyleBasisSchema>
 export type ReplyCandidate = z.infer<typeof ReplyCandidateSchema>
 export type TopicCandidate = z.infer<typeof TopicCandidateSchema>
+export type SupplementalAnswerResult = z.infer<typeof SupplementalAnswerResultSchema>
 export type LoveAnalysisResult = z.infer<typeof LoveAnalysisResultSchema>
 export type WorkAnalysisResult = z.infer<typeof WorkAnalysisResultSchema>
 export type CustomAnalysisResult = z.infer<typeof CustomAnalysisResultSchema>

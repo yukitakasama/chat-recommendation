@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   CalendarRange,
@@ -13,7 +13,7 @@ import type {
   AnalysisRun
 } from '../../../shared/schemas'
 import { formatError, useAppStore } from '../store'
-import { Button, Field, Input, Modal, Spinner, SwitchField } from './ui'
+import { Button, Field, Input, Modal, Spinner, SwitchField, Textarea } from './ui'
 import { AnalysisResultView } from './AnalysisResultView'
 
 export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React.JSX.Element {
@@ -40,6 +40,7 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
   const [imageConsent, setImageConsent] = useState(false)
   const [includeFiles, setIncludeFiles] = useState(false)
   const [fileConsent, setFileConsent] = useState(false)
+  const [supplementalQuestion, setSupplementalQuestion] = useState('')
   const [preflight, setPreflight] = useState<AnalysisPreflight | null>(null)
   const [preflightOpen, setPreflightOpen] = useState(false)
   const [preparing, setPreparing] = useState(false)
@@ -48,6 +49,8 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
   const [currentRunId, setCurrentRunId] = useState('')
   const [run, setRun] = useState<AnalysisRun | null>(null)
   const [error, setError] = useState('')
+  const preflightLock = useRef(false)
+  const submissionLock = useRef(false)
 
   const selectedMode = useMemo(() => modes.find((item) => item.id === modeId), [modeId, modes])
 
@@ -76,6 +79,7 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
     providerId,
     includeImages,
     includeFiles,
+    supplementalQuestion,
     scope: {
       from: dateBoundary(from, 'start'),
       to: dateBoundary(to, 'end')
@@ -83,11 +87,13 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
   })
 
   const openPreflight = async (): Promise<void> => {
+    if (preflightLock.current) return
     setError('')
     if (!friendId || !modeId || !personaId || !providerId) {
       setError('请选择好友、分析模式、人设和模型服务')
       return
     }
+    preflightLock.current = true
     setPreparing(true)
     try {
       const result = await window.api.analysis.preflight(buildInput())
@@ -98,12 +104,13 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
     } catch (preflightError) {
       setError(formatError(preflightError))
     } finally {
+      preflightLock.current = false
       setPreparing(false)
     }
   }
 
   const startAnalysis = async (): Promise<void> => {
-    if (!preflight) return
+    if (!preflight || submissionLock.current) return
     if (preflight.includesImages && !imageConsent) {
       setError('需要勾选图片发送授权')
       return
@@ -112,6 +119,7 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
       setError('需要勾选文件附件内容发送授权')
       return
     }
+    submissionLock.current = true
     setPreflightOpen(false)
     setRunning(true)
     setRun(null)
@@ -130,6 +138,7 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
     } catch (analysisError) {
       setError(formatError(analysisError))
     } finally {
+      submissionLock.current = false
       setRunning(false)
       setProgress(null)
       setCurrentRunId('')
@@ -225,6 +234,21 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
             <p>{selectedMode.description}</p>
           </div>
         ) : null}
+
+        <Field
+          label="补充问题（可选）"
+          hint={`${supplementalQuestion.length}/2000 字。留空时仅执行默认分析；填写后会与默认问题在同一次模型请求中发送。`}
+        >
+          <Textarea
+            className="analysis-question-input"
+            value={supplementalQuestion}
+            onChange={(event) => setSupplementalQuestion(event.target.value)}
+            placeholder="例如：结合全部聊天记录，对方最近对线下见面是什么态度？"
+            maxLength={2000}
+            rows={4}
+            disabled={running}
+          />
+        </Field>
 
         <SwitchField
           checked={includeImages}
@@ -373,6 +397,12 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
               <small>{preflight.protocol === 'responses' ? 'Responses API' : 'Chat Completions'}</small>
               <code>{preflight.endpoint}</code>
             </div>
+            {preflight.supplementalQuestion ? (
+              <div className="supplement-question-preview">
+                <small>补充问题</small>
+                <p>{preflight.supplementalQuestion}</p>
+              </div>
+            ) : null}
             {preflight.warnings.map((warning, index) => (
               <p className="preflight-warning" key={`${warning}-${index}`}>
                 {warning}

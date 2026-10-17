@@ -13,7 +13,8 @@ import type {
   Confidence,
   EvidenceRef,
   ReplyCandidate,
-  RiskLevel
+  RiskLevel,
+  SupplementalAnswerResult
 } from '../../../shared/schemas'
 import { useAppStore } from '../store'
 import { Button } from './ui'
@@ -51,6 +52,14 @@ export function AnalysisResultView({
           已完成
         </span>
       </header>
+
+      <div className="result-default-marker">
+        <MessageCircle size={16} />
+        <div>
+          <strong>默认问题分析</strong>
+          <span>按“{run.modeName}”模式生成的完整结果</span>
+        </div>
+      </div>
 
       {result.kind === 'love' ? (
         <>
@@ -216,6 +225,10 @@ export function AnalysisResultView({
         </>
       )}
 
+      {result.supplementalAnswer ? (
+        <SupplementalAnswerSection supplementalAnswer={result.supplementalAnswer} />
+      ) : null}
+
       {result.styleBasis ? (
         <section className="result-section style-basis">
           <div className="section-kicker">
@@ -250,6 +263,46 @@ export function AnalysisResultView({
         <span>本结果是有限证据下的推断，不代表事实或心理诊断。</span>
       </footer>
     </div>
+  )
+}
+
+function SupplementalAnswerSection({
+  supplementalAnswer
+}: {
+  supplementalAnswer: SupplementalAnswerResult
+}): React.JSX.Element {
+  return (
+    <section className="result-section result-section--supplemental">
+      <div className="section-kicker">
+        <MessageCircle size={17} />
+        补充提问回答
+      </div>
+      <blockquote className="supplement-question">{supplementalAnswer.question}</blockquote>
+      {supplementalAnswer.status === 'answered' ? (
+        <>
+          <p className="result-lead supplement-answer">{supplementalAnswer.answer}</p>
+          <EvidenceList items={supplementalAnswer.evidence} />
+          {supplementalAnswer.uncertainty.length ? (
+            <div className="uncertainty-list">
+              {supplementalAnswer.uncertainty.map((item, index) => (
+                <p key={`${item}-${index}`}>
+                  <AlertTriangle size={14} />
+                  {item}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          <div className="supplement-answer__actions">
+            <CopyButton text={supplementalAnswer.answer} label="复制补充回答" />
+          </div>
+        </>
+      ) : (
+        <div className="supplement-answer__failure">
+          <AlertTriangle size={16} />
+          <p>{supplementalAnswer.error ?? '补充问题未能生成有效回答，默认分析结果已保留。'}</p>
+        </div>
+      )}
+    </section>
   )
 }
 

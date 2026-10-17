@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   AnalysisModeInputSchema,
+  AnalysisPreflightInputSchema,
   LoveAnalysisResultSchema,
-  StyleSkillSchema
+  StyleSkillSchema,
+  SupplementalAnswerResultSchema
 } from '../../src/shared/schemas'
 
 const evidence = [{ messageId: 'm1', quote: '周末一起吃饭吗？', reason: '主动邀约' }]
@@ -84,5 +86,53 @@ describe('public data schemas', () => {
         ]
       }).success
     ).toBe(true)
+  })
+
+  it('keeps supplemental questions optional and bounded', () => {
+    const base = {
+      friendId: 'friend-1',
+      modeId: 'mode-1',
+      personaId: 'persona-1',
+      styleId: null,
+      providerId: 'provider-1',
+      includeImages: false,
+      includeFiles: false,
+      scope: { from: null, to: null }
+    }
+
+    expect(AnalysisPreflightInputSchema.parse(base).supplementalQuestion).toBe('')
+    expect(
+      AnalysisPreflightInputSchema.parse({
+        ...base,
+        supplementalQuestion: '  对方最近为什么回复变慢？  '
+      }).supplementalQuestion
+    ).toBe('对方最近为什么回复变慢？')
+    expect(
+      AnalysisPreflightInputSchema.safeParse({
+        ...base,
+        supplementalQuestion: '问'.repeat(2001)
+      }).success
+    ).toBe(false)
+  })
+
+  it('validates completed supplemental answers without breaking legacy results', () => {
+    expect(
+      SupplementalAnswerResultSchema.safeParse({
+        question: '对方最近为什么回复变慢？',
+        status: 'answered',
+        answer: '现有聊天只能看出对方工作繁忙，不能据此判断态度变化。',
+        evidence,
+        uncertainty: ['近期样本不足']
+      }).success
+    ).toBe(true)
+    expect(
+      SupplementalAnswerResultSchema.safeParse({
+        question: '对方最近为什么回复变慢？',
+        status: 'answered',
+        answer: '   ',
+        evidence: [],
+        uncertainty: []
+      }).success
+    ).toBe(false)
   })
 })

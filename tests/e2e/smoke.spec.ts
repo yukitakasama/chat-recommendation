@@ -25,6 +25,7 @@ test('first run creates a vault and friend workspace', async () => {
   )
   const secretText = '这句话只应该存在于加密保险库中'
   const fileSecret = 'QQChatExporter 文件附件中的可提取内容'
+  const supplementalQuestion = '结合现有证据，对方对周末见面是什么态度？'
   fs.writeFileSync(
     chatPath,
     `2025-03-01 10:02:03 小林(123456)
@@ -149,6 +150,7 @@ ${secretText}
   let evidenceMessageId = ''
   let evidenceAssetId = ''
   let fileAttachmentSent = false
+  let supplementalQuestionSent = false
   const modelServer = http.createServer((request, response) => {
     let body = ''
     request.on('data', (chunk) => {
@@ -157,6 +159,7 @@ ${secretText}
     request.on('end', () => {
       expect(body.length).toBeGreaterThan(10)
       if (body.includes(fileSecret)) fileAttachmentSent = true
+      if (body.includes(supplementalQuestion)) supplementalQuestionSent = true
       if (body.includes('可复用的回复风格档案')) {
         response.setHeader('content-type', 'application/json')
         response.end(
@@ -273,7 +276,21 @@ ${secretText}
           { text: '可以呀，你定时间。', tone: '主动', risk: 'medium', rationale: '推进安排' },
           { text: '周三之后会更方便。', tone: '直接', risk: 'low', rationale: '明确时间边界' }
         ],
-        warnings: []
+        warnings: [],
+        ...(body.includes(supplementalQuestion)
+          ? {
+              supplementalAnswer: {
+                answer: '对方没有明确拒绝见面，但也未给出具体时间，态度需要继续观察。',
+                evidence: [
+                  {
+                    messageId: evidenceMessageId,
+                    reason: '对方持续回应，但没有形成明确约定'
+                  }
+                ],
+                uncertainty: ['目前只有一组短对话样本']
+              }
+            }
+          : {})
       }
       response.setHeader('content-type', 'application/json')
       response.end(
@@ -412,13 +429,14 @@ ${secretText}
     expect(generatedStyle.sampleCount).toBe(1)
 
     const run = await page.evaluate(
-      async ({ friendId, providerId, personaId, modeId, styleId }) => {
+      async ({ friendId, providerId, personaId, modeId, styleId, question }) => {
         const input = {
           friendId,
           modeId,
           personaId,
           providerId,
           styleId,
+          supplementalQuestion: question,
           includeImages: true,
           scope: { from: null, to: null }
         }
@@ -434,17 +452,50 @@ ${secretText}
         providerId: configured.provider.id,
         personaId: configured.persona.id,
         modeId: configured.mode.id,
-        styleId: generatedStyle.id
+        styleId: generatedStyle.id,
+        question: supplementalQuestion
       }
     )
     expect(run.preflight.messageCount).toBe(3)
+    expect(run.preflight.supplementalQuestion).toBe(supplementalQuestion)
     expect(run.result.status).toBe('completed')
     expect(run.result.result?.kind).toBe('love')
     if (run.result.result?.kind === 'love') {
       expect(run.result.result.topics).toHaveLength(3)
       expect(run.result.result.replies).toHaveLength(3)
       expect(run.result.result.styleBasis?.styleName).toBe('测试回复风格')
+      expect(run.result.result.supplementalAnswer?.status).toBe('answered')
+      expect(run.result.result.supplementalAnswer?.question).toBe(supplementalQuestion)
     }
+    expect(supplementalQuestionSent).toBe(true)
+
+    const invalidSupplementRun = await page.evaluate(
+      async ({ friendId, providerId, personaId, modeId }) => {
+        return window.api.analysis.start({
+          friendId,
+          modeId,
+          personaId,
+          providerId,
+          styleId: null,
+          supplementalQuestion: '故意触发无效补充回答',
+          includeImages: false,
+          scope: { from: null, to: null },
+          consentToImages: false
+        })
+      },
+      {
+        friendId: imported.friendId,
+        providerId: configured.provider.id,
+        personaId: configured.persona.id,
+        modeId: configured.mode.id
+      }
+    )
+    expect(invalidSupplementRun.status).toBe('completed')
+    expect(invalidSupplementRun.result?.kind).toBe('love')
+    expect(invalidSupplementRun.result?.supplementalAnswer?.status).toBe('failed')
+    expect(invalidSupplementRun.result?.warnings).toContain(
+      '补充问题未能生成有效回答，默认分析结果已保留。'
+    )
 
     const workRun = await page.evaluate(
       async ({ friendId, providerId, personaId }) => {
@@ -469,6 +520,7 @@ ${secretText}
     )
     expect(workRun.status).toBe('completed')
     expect(workRun.result?.kind).toBe('work')
+    expect(workRun.result?.supplementalAnswer).toBeUndefined()
 
     const qqImported = await page.evaluate(
       async ({ friendId, jsonPath }) => {
@@ -532,6 +584,7 @@ ${secretText}
     expect(fileRun.preflight.fileCount).toBe(1)
     expect(fileRun.preflight.includesFiles).toBe(true)
     expect(fileRun.result.status).toBe('completed')
+    expect(fileRun.result.result?.supplementalAnswer).toBeUndefined()
     expect(fileAttachmentSent).toBe(true)
 
     const moved = await page.evaluate(
@@ -560,13 +613,29 @@ ${secretText}
       path: path.join(process.cwd(), 'test-results', 'imported-messages.png'),
       fullPage: true
     })
+    await page.getByRole('tab', { name: '开始分析' }).click()
+    const supplementalQuestionInput = page.getByPlaceholder(
+      '例如：结合全部聊天记录，对方最近对线下见面是什么态度？'
+    )
+    await expect(supplementalQuestionInput).toBeVisible()
+    await supplementalQuestionInput.fill(supplementalQuestion)
+    await expect(supplementalQuestionInput).toHaveValue(supplementalQuestion)
     await page.getByRole('tab', { name: '导入资料' }).click()
     await expect(page.locator('.batch-row')).toHaveCount(3)
     await page.getByRole('tab', { name: '分析历史' }).click()
-    await page.locator('.history-item').filter({ hasText: '恋爱建议' }).first().click()
+    const historyRuns = await page.evaluate(() => window.api.history.list())
+    const supplementalRunIndex = historyRuns.findIndex((item) => item.id === run.result.id)
+    expect(supplementalRunIndex).toBeGreaterThanOrEqual(0)
+    await page.locator('.history-item').nth(supplementalRunIndex).click()
     await expect(
       page.getByRole('heading', { name: '小林 的聊天分析' })
     ).toBeVisible()
+    await expect(page.getByText('默认问题分析')).toBeVisible()
+    await expect(page.getByText('补充提问回答')).toBeVisible()
+    await expect(page.getByText(supplementalQuestion)).toBeVisible()
+    await page.locator('.result-section--supplemental').screenshot({
+      path: path.join(process.cwd(), 'test-results', 'supplemental-answer.png')
+    })
     await page.screenshot({
       path: path.join(process.cwd(), 'test-results', 'analysis-result.png'),
       fullPage: true

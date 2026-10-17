@@ -1922,6 +1922,14 @@ h4 {
   margin-bottom: 16px;
 }
 
+.analysis-question-input {
+  min-height: 96px;
+}
+
+.analysis-config > .field {
+  margin-bottom: 14px;
+}
+
 .analysis-mode-note {
   display: flex;
   align-items: flex-start;
@@ -2080,6 +2088,30 @@ h4 {
   font-size: 10px;
 }
 
+.supplement-question-preview {
+  padding: 11px 12px;
+  margin-top: 10px;
+  border: 1px solid #c9ded6;
+  border-radius: 6px;
+  background: var(--accent-soft);
+}
+
+.supplement-question-preview small {
+  display: block;
+  color: var(--accent-strong);
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.supplement-question-preview p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .preflight-warning {
   padding: 7px 10px;
   margin: 9px 0 0;
@@ -2127,6 +2159,34 @@ h4 {
   font-size: 10px;
 }
 
+.result-default-marker {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 25px;
+  border-bottom: 1px solid var(--line);
+  color: var(--accent);
+  background: var(--surface-2);
+}
+
+.result-default-marker div {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.result-default-marker strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.result-default-marker span {
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
 .result-status {
   display: flex;
   align-items: center;
@@ -2149,6 +2209,56 @@ h4 {
 
 .result-section--affection {
   background: #fbf8f1;
+}
+
+.result-section--supplemental {
+  background: #f3f8f6;
+}
+
+.supplement-question {
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.supplement-answer {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.supplement-answer__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 9px;
+}
+
+.supplement-answer__failure {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e1bdc0;
+  border-radius: 6px;
+  color: #74383c;
+  background: var(--danger-soft);
+}
+
+.supplement-answer__failure svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.supplement-answer__failure p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.65;
 }
 
 .section-kicker {
