@@ -13,13 +13,40 @@ import {
 import type { DataPaths } from './paths'
 import { isPathInside } from './path-utils'
 import type { VaultDatabase } from './database'
+import { isQQStickerPath } from './qq-resources'
 
 interface StoredPreview {
   preview: ImportPreview
 }
 
+const CHAT_EXPORT_EXTENSIONS = new Set([
+  '.txt',
+  '.log',
+  '.mht',
+  '.mhtml',
+  '.html',
+  '.htm',
+  '.json',
+  '.csv'
+])
+
 function isScreenshot(filePath: string): boolean {
   return /截图|screenshot|screen[-_ ]?shot/i.test(path.basename(filePath))
+}
+
+function assetKind(
+  filePath: string
+): 'chat_export' | 'image' | 'screenshot' | 'sticker' | 'file' {
+  const image = isImagePath(filePath)
+  if (image && isQQStickerPath(filePath)) return 'sticker'
+  if (image) return isScreenshot(filePath) ? 'screenshot' : 'image'
+  if (
+    /[\\/]resources[\\/]/i.test(filePath) ||
+    !CHAT_EXPORT_EXTENSIONS.has(path.extname(filePath).toLowerCase())
+  ) {
+    return 'file'
+  }
+  return 'chat_export'
 }
 
 export class ImportService {
@@ -41,19 +68,27 @@ export class ImportService {
     const warnings = [...collected.warnings]
     const messages: ImportPreview['messages'] = []
     const extractedFiles: string[] = []
+    const referencedFiles: string[] = []
 
     for (const file of collected.textFiles) {
-      const parsed = await parseChatFile(file, friend.displayName, this.paths.tempDir)
+      const parsed = await parseChatFile(file, friend.displayName, this.paths.tempDir, sourcePaths)
       messages.push(...parsed.messages)
       warnings.push(...parsed.warnings.map((item) => `${path.basename(file)}：${item}`))
       extractedFiles.push(...parsed.extractedFiles)
+      referencedFiles.push(...(parsed.referencedFiles ?? []))
     }
 
     for (let index = 0; index < messages.length; index += 1) {
       messages[index] = { ...messages[index]!, seq: index }
     }
 
-    const allFiles = [...collected.textFiles, ...collected.imageFiles, ...extractedFiles]
+    const allFiles = [
+      ...collected.textFiles,
+      ...collected.imageFiles,
+      ...collected.resourceFiles,
+      ...extractedFiles,
+      ...referencedFiles
+    ]
     const seenSourcePaths = new Set<string>()
     const assets: ImportPreview['assets'] = []
     for (const sourcePath of allFiles) {
@@ -69,14 +104,14 @@ export class ImportService {
         )
         continue
       }
-      const image = isImagePath(normalized)
+      const kind = assetKind(normalized)
       assets.push({
         tempId: crypto.randomUUID(),
         originalName: path.basename(normalized),
         sourcePath: normalized,
         mime: mimeForFile(normalized),
         size: content.length,
-        kind: image ? (isScreenshot(normalized) ? 'screenshot' : 'image') : 'chat_export',
+        kind,
         sha256: sha256(content)
       })
     }
@@ -96,6 +131,8 @@ export class ImportService {
         textFiles: collected.textFiles.length,
         imageFiles: assets.filter((item) => item.kind === 'image').length,
         screenshotFiles: assets.filter((item) => item.kind === 'screenshot').length,
+        stickerFiles: assets.filter((item) => item.kind === 'sticker').length,
+        fileFiles: assets.filter((item) => item.kind === 'file').length,
         parsedMessages: messages.length
       }
     }

@@ -38,6 +38,8 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
   const [to, setTo] = useState('')
   const [includeImages, setIncludeImages] = useState(false)
   const [imageConsent, setImageConsent] = useState(false)
+  const [includeFiles, setIncludeFiles] = useState(false)
+  const [fileConsent, setFileConsent] = useState(false)
   const [preflight, setPreflight] = useState<AnalysisPreflight | null>(null)
   const [preflightOpen, setPreflightOpen] = useState(false)
   const [preparing, setPreparing] = useState(false)
@@ -73,6 +75,7 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
     styleId: styleId || null,
     providerId,
     includeImages,
+    includeFiles,
     scope: {
       from: dateBoundary(from, 'start'),
       to: dateBoundary(to, 'end')
@@ -90,6 +93,7 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
       const result = await window.api.analysis.preflight(buildInput())
       setPreflight(result)
       setImageConsent(false)
+      setFileConsent(false)
       setPreflightOpen(true)
     } catch (preflightError) {
       setError(formatError(preflightError))
@@ -104,6 +108,10 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
       setError('需要勾选图片发送授权')
       return
     }
+    if (preflight.includesFiles && !fileConsent) {
+      setError('需要勾选文件附件内容发送授权')
+      return
+    }
     setPreflightOpen(false)
     setRunning(true)
     setRun(null)
@@ -113,7 +121,8 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
     try {
       const completed = await window.api.analysis.start({
         ...buildInput(),
-        consentToImages: includeImages && imageConsent
+        consentToImages: includeImages && imageConsent,
+        consentToFiles: includeFiles && fileConsent
       })
       setRun(completed)
       await refreshHistory(friendId ?? undefined)
@@ -220,8 +229,16 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
         <SwitchField
           checked={includeImages}
           onCheckedChange={setIncludeImages}
-          label="本次分析包含聊天图片与截图"
-          description="默认关闭。开启后会在预检中显示图片数量，并在发送前再次确认。"
+          label="本次分析包含聊天图片、表情与截图"
+          description="默认关闭。开启后会在预检中显示视觉资源数量，并在发送前再次确认。"
+          disabled={running}
+        />
+
+        <SwitchField
+          checked={includeFiles}
+          onCheckedChange={setIncludeFiles}
+          label="本次分析读取文件附件内容"
+          description="默认关闭。文本、网页和 PDF 会在本地提取正文；发送前会再次确认，音频和未知二进制仅提供元数据。"
           disabled={running}
         />
 
@@ -308,7 +325,13 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
             <Button variant="secondary" onClick={() => setPreflightOpen(false)}>
               取消
             </Button>
-            <Button onClick={startAnalysis} disabled={preflight?.includesImages && !imageConsent}>
+            <Button
+              onClick={startAnalysis}
+              disabled={
+                Boolean(preflight?.includesImages && !imageConsent) ||
+                Boolean(preflight?.includesFiles && !fileConsent)
+              }
+            >
               开始分析
             </Button>
           </>
@@ -335,7 +358,11 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
               </span>
               <span>
                 <small>图片</small>
-                <strong>{preflight.imageCount} 张</strong>
+                <strong>{preflight.imageCount} 项</strong>
+              </span>
+              <span>
+                <small>文件附件</small>
+                <strong>{preflight.fileCount} 个</strong>
               </span>
               <span>
                 <small>预计请求</small>
@@ -360,6 +387,18 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
                 />
                 <span>
                   我确认将 {preflight.imageCount} 张聊天图片发送到上述视觉模型端点，并了解供应商的数据政策不由本应用控制。
+                </span>
+              </label>
+            ) : null}
+            {preflight.includesFiles ? (
+              <label className="check-row check-row--warning">
+                <input
+                  type="checkbox"
+                  checked={fileConsent}
+                  onChange={(event) => setFileConsent(event.target.checked)}
+                />
+                <span>
+                  我确认允许应用在本地读取 {preflight.fileCount} 个文件附件，并将可提取的文字内容发送到上述模型端点。
                 </span>
               </label>
             ) : null}

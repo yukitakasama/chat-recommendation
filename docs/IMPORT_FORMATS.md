@@ -46,6 +46,42 @@
 
 无法识别的对象会保留解析提示，允许用户在预览中手工整理文本。
 
+### QQChatExporter JSON 与资源目录
+
+应用适配 QQChatExporter 的私聊 JSON 结构：
+
+- `chatInfo.selfUin / selfUid` 与 `chatInfo.peerUin / peerUid` 用于区分“我”和“对方”。
+- `messages[].content.resources[]` 中的 `type`、`filename`、`localPath` 用于定位图片、文件和其他附件。
+- `messages[].content.elements[]` 中的 `market_face` 会结合 `sticker-packs` 内的 `all_sticker_packs.json`、`favorite_emojis.json` 和本地贴纸文件进行映射。
+
+标准导出目录如下：
+
+```text
+exports/
+  friend_xxx.json
+  resources/
+    images/
+    files/
+  sticker-packs/
+    all_packs_xxx/
+      all_sticker_packs.json
+      收藏的表情/
+        stickers/
+      贴纸包名称/
+        stickers/
+```
+
+只选择 JSON 时，应用会从 JSON 所在目录自动查找 `resources` 和 `sticker-packs`，并只导入消息实际引用的资源；也可以额外选择资源目录，此时该目录会作为解析来源，目录内受支持的文件也会进入该导入批次。
+
+- `resources/images` 中的图片和 `.suf` 文件按图片处理，可经用户授权发送视觉模型。
+- `market_face` 会显示表情名称并关联本地贴纸图片。
+- `resources/files` 中的 PDF、文本、网页、CSV、JSON 等会在用户开启“读取文件附件内容”后本地提取正文。
+- 音频、视频、压缩包和未知二进制会加密保存，但分析时只提供名称、类型、大小等元数据，不宣称已理解内容。
+- 缺失的本地资源会逐项告警；应用不会为了补全资源而静默访问远程 URL。
+- 任何通过 `localPath` 逃逸 JSON 目录或已选资源目录的路径都会被拒绝。
+
+复制模式不会修改导出目录；移动模式会在资产加密落盘和数据库提交成功后删除对应的 JSON、资源文件与已关联贴纸文件。
+
 ## CSV
 
 CSV 使用带表头模式，常见中英文字段映射与 JSON 相同。支持 UTF-8、UTF-16、GBK/GB18030 等文本编码检测和宽松列数。
@@ -60,7 +96,7 @@ MHT 作为 MIME 多段文件解析。HTML 正文进入聊天解析，内嵌图�
 
 ## 图片与截图
 
-支持 PNG、JPEG、WebP、GIF、BMP、TIFF。文件名包含“截图”“screenshot”“screen shot”的图片会标记为截图，可在导入预览中额外选择视觉模型识别文字。识别结果必须人工复核后提交。
+支持 PNG、JPEG、WebP、GIF、BMP、TIFF 和 QQChatExporter 常见的 `.suf` 图片。文件名包含“截图”“screenshot”“screen shot”的图片会标记为截图，可在导入预览中额外选择视觉模型识别文字。识别结果必须人工复核后提交。
 
 无论是否在导入时识别截图，图片都可以保存在保险库中；分析时是否发送云端视觉模型由每次预检的独立授权控制。
 

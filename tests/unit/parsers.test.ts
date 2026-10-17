@@ -197,7 +197,7 @@ ${image.toString('base64')}
     const dir = tempDir()
     fs.writeFileSync(path.join(dir, 'chat.txt'), 'hello')
     fs.writeFileSync(path.join(dir, 'photo.png'), Buffer.from([1, 2, 3]))
-    fs.writeFileSync(path.join(dir, 'unknown.exe'), 'nope')
+    fs.writeFileSync(path.join(dir, 'unknown.unsupported'), 'nope')
     const result = collectImportFiles([dir])
     expect(result.textFiles).toHaveLength(1)
     expect(result.imageFiles).toHaveLength(1)

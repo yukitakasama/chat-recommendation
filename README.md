@@ -5,12 +5,13 @@
 ## 已实现能力
 
 - 多好友与批次导入：QQ TXT/MHT/MHTML/HTML/JSON/CSV、通用结构化记录、图片和聊天截图。
+- QQChatExporter 资源适配：自动解析 JSON 中的图片、文件与市场表情引用，并从 `resources`、`sticker-packs` 读取对应本地资源。
 - “复制”与“移动”导入；重名不同内容保留两份，相同 SHA-256 文件复用加密 Blob。
 - “恋爱建议”和“应付工作”内置模式；支持创建声明式自定义模式。
 - 多人设新建、编辑、复制、删除与每次分析自由选择。
 - JSON 与 Markdown/SKILL.md 风格导入；从全部好友或指定好友的本人消息生成风格。
 - Chat Completions 与 Responses API 双协议；文本和视觉模型分别配置。
-- 全量历史分块摘要、近期原文、图片观察与证据引用；多批次调用前预检和逐次图片授权。
+- 全量历史分块摘要、近期原文、图片/表情观察、PDF 与文本附件提取和证据引用；多批次调用前预检与独立授权。
 - 加密分析历史、Markdown/JSON 导出、锁定保险库与系统锁屏自动锁定。
 - 便携 ZIP 与每用户 NSIS 安装包。
 
@@ -20,7 +21,8 @@
 - SQLCipher 加密数据库，图片和源文件以 AES-256-GCM 独立加密。
 - 渲染进程无 Node 权限，模型密钥和网络请求只存在于 Electron 主进程。
 - 不包含遥测、云同步、自动更新或静默模型调用。
-- 图片默认不参与分析。每次上传图片都显示端点、数量和用途并要求确认。
+- 图片、表情和截图默认不参与分析。每次上传视觉资源都显示端点、数量和用途并要求确认。
+- 文件附件默认不读取正文。开启后文本、网页和 PDF 在本地解密提取，发送前再次确认端点与文件数量。
 - 忘记密码且丢失恢复码时，数据无法恢复。恢复码只在建库时显示一次。
 - Markdown/JSON 导出是明文文件，导出前应自行确认保存位置。
 
@@ -69,6 +71,7 @@ ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ bun run dist
 
 - `bun run test`：加密、解析器、公共 schema 和双协议模型网关单元测试。
 - `bun run test:e2e`：真实 Electron 中建库、通过 IPC 导入、加密落盘、模拟模型分析、历史结果渲染与明文泄漏检查。
+- `bun run verify:qqchat <JSON路径>`：用真实 QQChatExporter 导出核对发送者、资源引用、贴纸映射与缺失资源告警。
 - `bun run benchmark:import`：合成 50,000 条消息和 500 张图片，验证本地解析、哈希、加密和提交耗时。
 - `bun run dist`：生成 `release` 下的便携 ZIP 与 NSIS 安装包。
 

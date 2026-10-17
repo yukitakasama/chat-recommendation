@@ -879,7 +879,10 @@ export class VaultDatabase {
     }
   }
 
-  listAssets(friendId: string, kind?: 'image' | 'screenshot'): Array<{
+  listAssets(
+    friendId: string,
+    kind?: 'image' | 'screenshot' | 'sticker' | 'file'
+  ): Array<{
     id: string
     blobId: string
     originalName: string
@@ -887,26 +890,27 @@ export class VaultDatabase {
     kind: string
     encryptedPath: string
     sha256: string
+    size: number
   }> {
     const rows = (
       kind
         ? this.db
             .prepare(
               `SELECT min(a.id) AS id, a.blob_id, min(a.original_name) AS original_name,
-                      b.mime, a.kind, b.encrypted_path, b.sha256
+                      b.mime, a.kind, b.encrypted_path, b.sha256, b.size
                FROM assets a JOIN blobs b ON b.id = a.blob_id
                WHERE a.friend_id = ? AND a.kind = ?
-               GROUP BY a.blob_id, b.mime, a.kind, b.encrypted_path, b.sha256
+               GROUP BY a.blob_id, b.mime, a.kind, b.encrypted_path, b.sha256, b.size
                ORDER BY max(a.created_at) DESC`
             )
             .all(friendId, kind)
         : this.db
             .prepare(
               `SELECT min(a.id) AS id, a.blob_id, min(a.original_name) AS original_name,
-                      b.mime, a.kind, b.encrypted_path, b.sha256
+                      b.mime, a.kind, b.encrypted_path, b.sha256, b.size
                FROM assets a JOIN blobs b ON b.id = a.blob_id
-               WHERE a.friend_id = ? AND a.kind IN ('image', 'screenshot')
-               GROUP BY a.blob_id, b.mime, a.kind, b.encrypted_path, b.sha256
+               WHERE a.friend_id = ? AND a.kind IN ('image', 'screenshot', 'sticker')
+               GROUP BY a.blob_id, b.mime, a.kind, b.encrypted_path, b.sha256, b.size
                ORDER BY max(a.created_at) DESC`
             )
             .all(friendId)
@@ -918,6 +922,7 @@ export class VaultDatabase {
       kind: string
       encrypted_path: string
       sha256: string
+      size: number
     }>
     return rows.map((row) => ({
       id: row.id,
@@ -926,7 +931,8 @@ export class VaultDatabase {
       mime: row.mime,
       kind: row.kind,
       encryptedPath: row.encrypted_path,
-      sha256: row.sha256
+      sha256: row.sha256,
+      size: row.size
     }))
   }
 

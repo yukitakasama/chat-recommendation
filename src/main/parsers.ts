@@ -7,20 +7,76 @@ import { load } from 'cheerio'
 import { parse as parseCsv } from 'csv-parse/sync'
 import { simpleParser } from 'mailparser'
 import type { MessageInput } from '../shared/schemas'
+import {
+  isQQStickerPath,
+  QQResourceResolver,
+  type QQResourceReference
+} from './qq-resources'
 
 const TEXT_EXTENSIONS = new Set(['.txt', '.log', '.json', '.csv', '.html', '.htm', '.mht', '.mhtml'])
-const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tif', '.tiff'])
+const IMAGE_EXTENSIONS = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.bmp',
+  '.tif',
+  '.tiff',
+  '.suf'
+])
+const RESOURCE_EXTENSIONS = new Set([
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.txt',
+  '.md',
+  '.markdown',
+  '.rtf',
+  '.csv',
+  '.json',
+  '.xml',
+  '.html',
+  '.htm',
+  '.m4a',
+  '.mp3',
+  '.wav',
+  '.amr',
+  '.ogg',
+  '.mp4',
+  '.mov',
+  '.avi',
+  '.zip',
+  '.7z',
+  '.rar',
+  '.apk',
+  '.exe',
+  '.bin',
+  '.dat'
+])
+const QQ_STICKER_CATALOG_FILES = new Set([
+  'all_sticker_packs.json',
+  'favorite_emojis.json',
+  'pack_info.json',
+  'summary.json'
+])
 const MAX_TEXT_FILE_BYTES = 120 * 1024 * 1024
 
 export interface ParsedConversation {
   messages: MessageInput[]
   warnings: string[]
   extractedFiles: string[]
+  referencedFiles?: string[]
 }
 
 export interface CollectedFiles {
   textFiles: string[]
   imageFiles: string[]
+  resourceFiles: string[]
   warnings: string[]
 }
 
@@ -114,6 +170,16 @@ function extractAssetNames(text: string): string[] {
     if (match[1]) names.add(path.basename(match[1]))
   }
   return [...names]
+}
+
+function appendResourceLabels(text: string, resources: QQResourceReference[]): string {
+  let result = text.trim()
+  for (const resource of resources) {
+    if (resource.kind === 'image' && result) continue
+    if (result.includes(resource.label)) continue
+    result = result ? `${result}\n${resource.label}` : resource.label
+  }
+  return result
 }
 
 function message(
@@ -360,7 +426,8 @@ function parseStructuredRows(
   rows: unknown[],
   friendName: string,
   sourceName: string,
-  identity: JsonChatIdentity = emptyChatIdentity()
+  identity: JsonChatIdentity = emptyChatIdentity(),
+  resourceResolver?: QQResourceResolver
 ): ParsedConversation {
   const messages: MessageInput[] = []
   const warnings: string[] = []
@@ -397,7 +464,8 @@ function parseStructuredRows(
       '内容'
     ])
     const rawRole = pick(record, ['senderRole', 'role', 'isSelf', 'fromSelf', 'is_self'])
-    const text = fmtValue(rawText).trim()
+    const resources = resourceResolver?.resolveMessageResources(record) ?? []
+    const text = appendResourceLabels(fmtValue(rawText).trim(), resources)
     if (!text && !rawTime && !rawSender) continue
     const senderInfo = extractStructuredSender(rawSender, record)
     let role = roleForStructuredSender(senderInfo, friendName, identity)
@@ -421,6 +489,16 @@ function parseStructuredRows(
           : role === 'system'
             ? 'QQ系统'
             : '未知发送者')
+    const hasVisualResource = resources.some(
+      (resource) => resource.kind === 'image' || resource.kind === 'sticker'
+    )
+    const hasFileResource = resources.some((resource) => resource.kind === 'file')
+    const assetNames = [
+      ...new Set([
+        ...extractAssetNames(text),
+        ...resources.flatMap((resource) => resource.names)
+      ])
+    ]
     messages.push({
       tempId: stableId(),
       seq: messages.length,
@@ -428,8 +506,17 @@ function parseStructuredRows(
       senderName: sender,
       senderRole: role,
       text: text || '[非文本消息]',
-      messageType: /^(?:\[图片\]|图片|image)$/i.test(text) ? 'image' : 'text',
-      assetNames: extractAssetNames(text)
+      messageType:
+        role === 'system'
+          ? 'system'
+          : hasVisualResource
+            ? 'image'
+            : hasFileResource
+              ? 'other'
+              : /^(?:\[图片\]|图片|image)$/i.test(text)
+                ? 'image'
+                : 'text',
+      assetNames
     })
   }
   if (messages.length === 0) {
@@ -438,20 +525,41 @@ function parseStructuredRows(
   if (messages.some((item) => item.senderRole === 'unknown')) {
     warnings.push('部分发送者无法判断是我还是好友，请在导入预览中纠正。')
   }
-  return { messages, warnings, extractedFiles: [] }
+  if (resourceResolver) warnings.push(...resourceResolver.warnings)
+  return {
+    messages,
+    warnings,
+    extractedFiles: [],
+    referencedFiles: resourceResolver?.referencedFiles ?? []
+  }
 }
 
-export function parseJsonConversation(source: string, friendName: string, sourceName: string): ParsedConversation {
+export function parseJsonConversation(
+  source: string,
+  friendName: string,
+  sourceName: string,
+  sourceDir?: string,
+  resourceRoots: string[] = []
+): ParsedConversation {
   let data: unknown
   try {
     data = JSON.parse(source)
   } catch {
     return { messages: [], warnings: [`${sourceName} 不是有效 JSON。`], extractedFiles: [] }
   }
-  if (Array.isArray(data)) return parseStructuredRows(data, friendName, sourceName)
+  const resourceResolver = sourceDir ? new QQResourceResolver(sourceDir, resourceRoots) : undefined
+  if (Array.isArray(data)) {
+    return parseStructuredRows(data, friendName, sourceName, emptyChatIdentity(), resourceResolver)
+  }
   const rows = findMessageArray(data)
   if (rows) {
-    return parseStructuredRows(rows, friendName, sourceName, extractChatIdentity(data))
+    return parseStructuredRows(
+      rows,
+      friendName,
+      sourceName,
+      extractChatIdentity(data),
+      resourceResolver
+    )
   }
   return {
     messages: [],
@@ -504,7 +612,7 @@ export function parseHtmlConversation(source: string, friendName: string): Parse
   return parseTextConversation(htmlToText(source), friendName)
 }
 
-function decodeText(buffer: Buffer): string {
+export function decodeText(buffer: Buffer): string {
   const detected = chardet.detect(buffer)
   const candidates = [
     detected,
@@ -579,7 +687,8 @@ async function parseMht(
 export async function parseChatFile(
   filePath: string,
   friendName: string,
-  tempDir: string
+  tempDir: string,
+  resourceRoots: string[] = []
 ): Promise<ParsedConversation> {
   const extension = path.extname(filePath).toLowerCase()
   const stats = fs.statSync(filePath)
@@ -596,7 +705,15 @@ export async function parseChatFile(
     return parseMht(buffer, friendName, sourceName, tempDir)
   }
   const text = decodeText(buffer)
-  if (extension === '.json') return parseJsonConversation(text, friendName, sourceName)
+  if (extension === '.json') {
+    return parseJsonConversation(
+      text,
+      friendName,
+      sourceName,
+      path.dirname(filePath),
+      resourceRoots
+    )
+  }
   if (extension === '.csv') return parseCsvConversation(text, friendName, sourceName)
   if (extension === '.html' || extension === '.htm') {
     return parseHtmlConversation(text, friendName)
@@ -604,9 +721,24 @@ export async function parseChatFile(
   return parseTextConversation(text, friendName)
 }
 
+function isQQResourceDirectoryPath(filePath: string): boolean {
+  return filePath
+    .replace(/\\/g, '/')
+    .split('/')
+    .some((segment) => segment === 'resources' || segment === 'sticker-packs')
+}
+
+function isQQStickerCatalogFile(filePath: string): boolean {
+  return (
+    isQQStickerPath(filePath) &&
+    QQ_STICKER_CATALOG_FILES.has(path.basename(filePath).toLowerCase())
+  )
+}
+
 export function collectImportFiles(paths: string[]): CollectedFiles {
   const textFiles: string[] = []
   const imageFiles: string[] = []
+  const resourceFiles: string[] = []
   const warnings: string[] = []
 
   const visit = (target: string): void => {
@@ -628,15 +760,27 @@ export function collectImportFiles(paths: string[]): CollectedFiles {
     }
     if (!stat.isFile()) return
     const extension = path.extname(resolved).toLowerCase()
-    if (TEXT_EXTENSIONS.has(extension)) textFiles.push(resolved)
-    else if (IMAGE_EXTENSIONS.has(extension)) imageFiles.push(resolved)
-    else warnings.push(`不支持的文件类型，已跳过：${path.basename(resolved)}`)
+    if (QQ_STICKER_CATALOG_FILES.has(path.basename(resolved).toLowerCase())) {
+      if (isQQStickerCatalogFile(resolved)) return
+    }
+    if (IMAGE_EXTENSIONS.has(extension)) imageFiles.push(resolved)
+    else if (TEXT_EXTENSIONS.has(extension) && !isQQResourceDirectoryPath(resolved)) {
+      textFiles.push(resolved)
+    } else if (
+      RESOURCE_EXTENSIONS.has(extension) ||
+      isQQResourceDirectoryPath(resolved)
+    ) {
+      resourceFiles.push(resolved)
+    } else {
+      warnings.push(`不支持的文件类型，已跳过：${path.basename(resolved)}`)
+    }
   }
 
   for (const item of paths) visit(item)
   return {
     textFiles: [...new Set(textFiles)].sort(),
     imageFiles: [...new Set(imageFiles)].sort(),
+    resourceFiles: [...new Set(resourceFiles)].sort(),
     warnings
   }
 }
@@ -657,6 +801,40 @@ export function mimeForFile(filePath: string): string {
     case '.tif':
     case '.tiff':
       return 'image/tiff'
+    case '.suf':
+      return 'image/*'
+    case '.pdf':
+      return 'application/pdf'
+    case '.m4a':
+      return 'audio/mp4'
+    case '.mp3':
+      return 'audio/mpeg'
+    case '.wav':
+      return 'audio/wav'
+    case '.amr':
+      return 'audio/amr'
+    case '.ogg':
+      return 'audio/ogg'
+    case '.mp4':
+      return 'video/mp4'
+    case '.doc':
+      return 'application/msword'
+    case '.docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    case '.xls':
+      return 'application/vnd.ms-excel'
+    case '.xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    case '.ppt':
+      return 'application/vnd.ms-powerpoint'
+    case '.pptx':
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    case '.zip':
+      return 'application/zip'
+    case '.7z':
+      return 'application/x-7z-compressed'
+    case '.rar':
+      return 'application/vnd.rar'
     case '.json':
       return 'application/json'
     case '.csv':

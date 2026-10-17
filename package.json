@@ -1,6 +1,6 @@
 {
   "name": "chat-insight",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Windows x64 local chat analysis desktop application",
   "main": "./out/main/index.js",
@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "test:e2e": "bun run build && playwright test",
     "benchmark:import": "bun scripts/benchmark-import.ts",
+    "verify:qqchat": "bun scripts/verify-qq-chat-exporter.ts",
     "rebuild": "electron-builder install-app-deps",
     "dist": "bun run build && electron-builder --win",
     "dist:dir": "bun run build && electron-builder --dir"
@@ -43,6 +44,7 @@
     "iconv-lite": "^0.7.3",
     "lucide-react": "^1.59.0",
     "mailparser": "^3.9.40",
+    "pdf-parse": "2.4.5",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "sharp": "^0.35.5",

@@ -242,7 +242,7 @@ export function registerIpc(options: {
   })
   ipcMain.handle('imports:pick-image-folder', async () => {
     const result = await showOpenDialog({
-      title: '选择聊天图片目录',
+      title: '选择 QQChatExporter 资源目录',
       properties: ['openDirectory']
     })
     return { paths: result.filePaths, canceled: result.canceled }

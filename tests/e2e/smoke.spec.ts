@@ -11,7 +11,20 @@ test('first run creates a vault and friend workspace', async () => {
   const chatPath = path.join(fixtureRoot, 'chat.txt')
   const imagePath = path.join(fixtureRoot, 'photo.png')
   const movePath = path.join(fixtureRoot, 'move.txt')
+  const qqRoot = path.join(fixtureRoot, 'qq-export')
+  const qqJsonPath = path.join(qqRoot, 'friend_test_20002.json')
+  const qqImagePath = path.join(qqRoot, 'resources', 'images', 'qq-photo.suf')
+  const qqFilePath = path.join(qqRoot, 'resources', 'files', 'note.txt')
+  const qqStickerPath = path.join(
+    qqRoot,
+    'sticker-packs',
+    'all_packs_1',
+    '测试包',
+    'stickers',
+    'sticker_md5_微笑.gif'
+  )
   const secretText = '这句话只应该存在于加密保险库中'
+  const fileSecret = 'QQChatExporter 文件附件中的可提取内容'
   fs.writeFileSync(
     chatPath,
     `2025-03-01 10:02:03 小林(123456)
@@ -25,22 +38,117 @@ ${secretText}
     `2025-03-02 09:00:00 小林: 这条记录用于验证移动导入\n2025-03-02 09:01:00 我: 收到`,
     'utf8'
   )
+  const imageBuffer = await sharp({
+    create: {
+      width: 32,
+      height: 32,
+      channels: 4,
+      background: { r: 51, g: 117, b: 104, alpha: 1 }
+    }
+  })
+    .png()
+    .toBuffer()
+  fs.writeFileSync(imagePath, imageBuffer)
+  fs.mkdirSync(path.dirname(qqImagePath), { recursive: true })
+  fs.mkdirSync(path.dirname(qqFilePath), { recursive: true })
+  fs.mkdirSync(path.dirname(qqStickerPath), { recursive: true })
+  fs.writeFileSync(qqImagePath, imageBuffer)
+  fs.writeFileSync(qqFilePath, fileSecret, 'utf8')
   fs.writeFileSync(
-    imagePath,
-    await sharp({
-      create: {
-        width: 32,
-        height: 32,
-        channels: 4,
-        background: { r: 51, g: 117, b: 104, alpha: 1 }
-      }
-    })
-      .png()
-      .toBuffer()
+    qqStickerPath,
+    Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
+  )
+  fs.writeFileSync(
+    path.join(qqRoot, 'sticker-packs', 'all_packs_1', 'all_sticker_packs.json'),
+    JSON.stringify({
+      packs: [
+        {
+          packName: '测试包',
+          stickers: [
+            {
+              id: 'sticker_md5',
+              md5: 'sticker_md5',
+              name: '微笑'
+            }
+          ]
+        }
+      ]
+    }),
+    'utf8'
+  )
+  fs.writeFileSync(
+    qqJsonPath,
+    JSON.stringify({
+      chatInfo: {
+        type: 'private',
+        name: '小林',
+        selfUin: '10001',
+        selfUid: 'u_self',
+        selfName: '我',
+        peerUin: '20002',
+        peerUid: 'u_peer'
+      },
+      messages: [
+        {
+          timestamp: 1760690000000,
+          type: 'text',
+          system: false,
+          sender: { uin: '20002', name: '小林' },
+          content: {
+            text: '',
+            elements: [{ type: 'image' }],
+            resources: [
+              {
+                type: 'image',
+                filename: 'qq-photo.suf',
+                localPath: 'images/qq-photo.suf'
+              }
+            ]
+          }
+        },
+        {
+          timestamp: 1760690001000,
+          type: 'file',
+          system: false,
+          sender: { uin: '10001', name: '我' },
+          content: {
+            text: '',
+            resources: [
+              {
+                type: 'file',
+                filename: 'note.txt',
+                localPath: 'files/note.txt'
+              }
+            ]
+          }
+        },
+        {
+          timestamp: 1760690002000,
+          type: 'type_17',
+          system: false,
+          sender: { uin: '20002', name: '小林' },
+          content: {
+            text: '',
+            elements: [
+              {
+                type: 'market_face',
+                data: {
+                  emojiId: 'sticker_md5',
+                  emojiPackageId: 1,
+                  name: '微笑'
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }),
+    'utf8'
   )
 
   let evidenceMessageId = ''
   let evidenceAssetId = ''
+  let fileAttachmentSent = false
   const modelServer = http.createServer((request, response) => {
     let body = ''
     request.on('data', (chunk) => {
@@ -48,6 +156,7 @@ ${secretText}
     })
     request.on('end', () => {
       expect(body.length).toBeGreaterThan(10)
+      if (body.includes(fileSecret)) fileAttachmentSent = true
       if (body.includes('可复用的回复风格档案')) {
         response.setHeader('content-type', 'application/json')
         response.end(
@@ -361,6 +470,70 @@ ${secretText}
     expect(workRun.status).toBe('completed')
     expect(workRun.result?.kind).toBe('work')
 
+    const qqImported = await page.evaluate(
+      async ({ friendId, jsonPath }) => {
+        const preview = await window.api.imports.preview(friendId, [jsonPath])
+        const committed = await window.api.imports.commit({
+          previewId: preview.id,
+          friendId,
+          action: 'copy',
+          messages: preview.messages
+        })
+        const storedMessages = await window.api.messages.list(friendId)
+        return {
+          committed,
+          assetKinds: preview.assets.map((asset) => asset.kind).sort(),
+          previewMessages: preview.messages,
+          storedQQMessages: storedMessages.slice(-3)
+        }
+      },
+      { friendId: imported.friendId, jsonPath: qqJsonPath }
+    )
+    expect(qqImported.committed.importedMessages).toBe(3)
+    expect(qqImported.assetKinds).toEqual(
+      expect.arrayContaining(['chat_export', 'file', 'image', 'sticker'])
+    )
+    expect(qqImported.previewMessages.some((message) => message.text.includes('[附件: note.txt]'))).toBe(
+      true
+    )
+    expect(qqImported.previewMessages.some((message) => message.text.includes('[表情: 微笑]'))).toBe(
+      true
+    )
+    expect(qqImported.storedQQMessages.every((message) => message.assetIds.length > 0)).toBe(true)
+
+    const fileRun = await page.evaluate(
+      async ({ friendId, providerId, personaId }) => {
+        const modes = await window.api.modes.list()
+        const loveMode = modes.find((mode) => mode.name === '恋爱建议')!
+        const input = {
+          friendId,
+          modeId: loveMode.id,
+          personaId,
+          providerId,
+          styleId: null,
+          includeImages: false,
+          includeFiles: true,
+          scope: { from: null, to: null }
+        }
+        const preflight = await window.api.analysis.preflight(input)
+        const result = await window.api.analysis.start({
+          ...input,
+          consentToImages: false,
+          consentToFiles: true
+        })
+        return { preflight, result }
+      },
+      {
+        friendId: imported.friendId,
+        providerId: configured.provider.id,
+        personaId: configured.persona.id
+      }
+    )
+    expect(fileRun.preflight.fileCount).toBe(1)
+    expect(fileRun.preflight.includesFiles).toBe(true)
+    expect(fileRun.result.status).toBe('completed')
+    expect(fileAttachmentSent).toBe(true)
+
     const moved = await page.evaluate(
       async ({ friendId, filePath }) => {
         const preview = await window.api.imports.preview(friendId, [filePath])
@@ -379,7 +552,7 @@ ${secretText}
       async (friendId) => window.api.imports.listBatches(friendId),
       imported.friendId
     )
-    expect(batches).toHaveLength(2)
+    expect(batches).toHaveLength(3)
 
     await page.reload()
     await expect(page.getByText(secretText)).toBeVisible()
@@ -388,9 +561,9 @@ ${secretText}
       fullPage: true
     })
     await page.getByRole('tab', { name: '导入资料' }).click()
-    await expect(page.locator('.batch-row')).toHaveCount(2)
+    await expect(page.locator('.batch-row')).toHaveCount(3)
     await page.getByRole('tab', { name: '分析历史' }).click()
-    await page.locator('.history-item').filter({ hasText: '恋爱建议' }).click()
+    await page.locator('.history-item').filter({ hasText: '恋爱建议' }).first().click()
     await expect(
       page.getByRole('heading', { name: '小林 的聊天分析' })
     ).toBeVisible()
@@ -421,7 +594,7 @@ ${secretText}
       async (friendId) => window.api.messages.list(friendId),
       imported.friendId
     )
-    expect(remainingMessages).toHaveLength(2)
+    expect(remainingMessages).toHaveLength(5)
 
     expect(fs.existsSync(path.join(appRoot, 'data', 'vault.db'))).toBe(true)
 

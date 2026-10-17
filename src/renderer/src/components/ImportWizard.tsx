@@ -227,8 +227,8 @@ export function ImportWizard({ onImported }: { onImported: () => void }): React.
         <>
           <div className="drop-zone">
             <UploadCloud size={30} />
-            <h3>选择聊天导出文件或图片目录</h3>
-            <p>支持 QQ TXT、MHT、HTML、JSON、CSV，以及常见图片和截图格式。</p>
+            <h3>选择聊天导出文件或 QQChatExporter 资源目录</h3>
+            <p>支持 QQChatExporter JSON 及其 resources、sticker-packs 中的图片、表情和文件附件。</p>
             <div className="action-row">
               <Button onClick={pickChatFiles}>
                 <Files size={16} />
@@ -239,7 +239,7 @@ export function ImportWizard({ onImported }: { onImported: () => void }): React.
                 选择图片文件
               </Button>
               <Button variant="ghost" onClick={pickImageFolder}>
-                选择图片目录
+                选择资源目录
               </Button>
             </div>
           </div>
@@ -284,6 +284,12 @@ export function ImportWizard({ onImported }: { onImported: () => void }): React.
             </span>
             <span>
               <strong>{preview.stats.screenshotFiles}</strong> 张截图
+            </span>
+            <span>
+              <strong>{preview.stats.stickerFiles}</strong> 个表情
+            </span>
+            <span>
+              <strong>{preview.stats.fileFiles}</strong> 个文件
             </span>
             <span>
               <strong>{preview.assets.length}</strong> 个源文件

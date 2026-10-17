@@ -18,6 +18,8 @@ test('packaged x64 application loads native vault modules', async () => {
   })
   try {
     const page = await electronApp.firstWindow()
+    const state = await page.evaluate(() => window.api.app.getState())
+    expect(state.version).toBe('1.2.0')
     await expect(page.getByRole('heading', { name: '创建加密保险库' })).toBeVisible()
     const passwordInputs = page.locator('input[type="password"]')
     await passwordInputs.nth(0).fill('PackagedTest123')

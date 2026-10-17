@@ -133,7 +133,7 @@ export const ImportAssetSchema = z.object({
   sourcePath: z.string(),
   mime: z.string(),
   size: z.number().int().nonnegative(),
-  kind: z.enum(['chat_export', 'image', 'screenshot']),
+  kind: z.enum(['chat_export', 'image', 'screenshot', 'sticker', 'file']),
   sha256: z.string().optional()
 })
 
@@ -149,6 +149,8 @@ export const ImportPreviewSchema = z.object({
     textFiles: z.number().int(),
     imageFiles: z.number().int(),
     screenshotFiles: z.number().int(),
+    stickerFiles: z.number().int().default(0),
+    fileFiles: z.number().int().default(0),
     parsedMessages: z.number().int()
   })
 })
@@ -296,6 +298,7 @@ export const AnalysisPreflightInputSchema = z.object({
   styleId: z.string().nullable().default(null),
   providerId: z.string().min(1),
   includeImages: z.boolean().default(false),
+  includeFiles: z.boolean().default(false),
   scope: AnalysisScopeSchema
 })
 
@@ -308,13 +311,16 @@ export const AnalysisPreflightSchema = z.object({
   messageCount: z.number().int(),
   characterCount: z.number().int(),
   imageCount: z.number().int(),
+  fileCount: z.number().int(),
   estimatedRequests: z.number().int(),
   includesImages: z.boolean(),
+  includesFiles: z.boolean(),
   warnings: z.array(z.string())
 })
 
 export const AnalysisStartInputSchema = AnalysisPreflightInputSchema.extend({
-  consentToImages: z.boolean()
+  consentToImages: z.boolean().default(false),
+  consentToFiles: z.boolean().default(false)
 })
 
 export const AnalysisProgressSchema = z.object({
