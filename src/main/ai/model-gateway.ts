@@ -29,7 +29,8 @@ export class ModelGatewayError extends Error {
   constructor(
     message: string,
     readonly status?: number,
-    readonly retryable = false
+    readonly retryable = false,
+    readonly requestId?: string
   ) {
     super(message)
     this.name = 'ModelGatewayError'
@@ -67,45 +68,347 @@ function responseContent(request: ModelRequest): Array<Record<string, unknown>> 
   ]
 }
 
-function extractChatText(payload: unknown): string {
-  const root = payload as {
-    choices?: Array<{
-      message?: {
-        content?: string | Array<{ type?: string; text?: string }>
-      }
-    }>
-    output_text?: string
-  }
-  const content = root.choices?.[0]?.message?.content
+interface NormalizedResponsesPayload {
+  text: string
+  status?: string
+  incompleteReason?: string
+  outputTypes: string[]
+  requestId?: string
+  errorCode?: string
+  hasReasoning: boolean
+  hasToolCall: boolean
+}
+
+interface SseEvent {
+  event?: string
+  data: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value
+  const record = asRecord(value)
+  if (record && typeof record.value === 'string' && record.value.trim()) return record.value
+  return undefined
+}
+
+function contentText(content: unknown): string {
   if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return content.map((part) => part.text ?? '').join('')
+  if (!Array.isArray(content)) return ''
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part
+      const record = asRecord(part)
+      if (!record) return ''
+      return nonEmptyString(record.text) ?? nonEmptyString(record.refusal) ?? ''
+    })
+    .join('')
+}
+
+function responseOutputText(output: unknown[]): string {
+  const finalItems = output
+    .map(asRecord)
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .filter((item) => {
+      const type = nonEmptyString(item.type)
+      return !type || type === 'message' || type === 'output_text'
+    })
+  return finalItems
+    .map((item) => nonEmptyString(item.text) ?? contentText(item.content))
+    .join('')
+}
+
+function unwrapResponsesPayload(payload: unknown): unknown {
+  let current = payload
+  for (let depth = 0; depth < 3; depth += 1) {
+    const root = asRecord(current)
+    if (!root) break
+    if (
+      'output_text' in root ||
+      'output' in root ||
+      'choices' in root ||
+      'error' in root ||
+      'text' in root
+    ) {
+      break
+    }
+    const wrapper = ['response', 'data', 'result']
+      .map((key) => root[key])
+      .find((value) => Boolean(asRecord(value)))
+    if (!wrapper) break
+    current = wrapper
   }
-  if (typeof root.output_text === 'string') return root.output_text
+  return current
+}
+
+export function normalizeResponsesPayload(
+  payload: unknown,
+  headerRequestId?: string
+): NormalizedResponsesPayload {
+  const unwrapped = unwrapResponsesPayload(payload)
+  const root = asRecord(unwrapped)
+  if (!root) {
+    return {
+      text: '',
+      outputTypes: [],
+      requestId: headerRequestId,
+      hasReasoning: false,
+      hasToolCall: false
+    }
+  }
+
+  const output = Array.isArray(root.output) ? root.output : []
+  const outputTypes = output.map((item) => nonEmptyString(asRecord(item)?.type) ?? 'unknown')
+  const status = nonEmptyString(root.status)
+  const incompleteDetails = asRecord(root.incomplete_details)
+  const incompleteReason = nonEmptyString(incompleteDetails?.reason)
+  const errorRecord = asRecord(root.error)
+  const errorCode =
+    nonEmptyString(errorRecord?.code) ??
+    nonEmptyString(root.error_code) ??
+    (typeof root.error === 'string' ? 'upstream_error' : undefined)
+  const hasReasoning = outputTypes.includes('reasoning')
+  const hasToolCall = outputTypes.some((type) =>
+    [
+      'function_call',
+      'tool_call',
+      'computer_call',
+      'local_shell_call',
+      'web_search_call'
+    ].includes(type)
+  )
+
+  let text = nonEmptyString(root.output_text) ?? ''
+  if (!text) text = responseOutputText(output)
+  if (!text) {
+    const choices = Array.isArray(root.choices) ? root.choices : []
+    const message = asRecord(asRecord(choices[0])?.message)
+    text = contentText(message?.content)
+  }
+  if (!text) text = nonEmptyString(root.text) ?? ''
+
+  return {
+    text,
+    status,
+    incompleteReason,
+    outputTypes,
+    requestId: nonEmptyString(root.id) ?? headerRequestId,
+    errorCode,
+    hasReasoning,
+    hasToolCall
+  }
+}
+
+function diagnosticValue(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.:-]/g, '?').slice(0, 80)
+}
+
+function responseDiagnostic(normalized: NormalizedResponsesPayload): string {
+  const details: string[] = []
+  if (normalized.status) details.push(`状态：${diagnosticValue(normalized.status)}`)
+  if (normalized.outputTypes.length) {
+    details.push(`输出项：${normalized.outputTypes.map(diagnosticValue).join(',')}`)
+  }
+  if (normalized.requestId) details.push(`请求 ID：${diagnosticValue(normalized.requestId)}`)
+  return details.length ? `（${details.join('；')}）` : ''
+}
+
+function requireResponsesText(normalized: NormalizedResponsesPayload): string {
+  if (normalized.status === 'failed' || normalized.errorCode) {
+    throw new ModelGatewayError(
+      `模型服务返回失败状态${responseDiagnostic(normalized)}`,
+      undefined,
+      false,
+      normalized.requestId
+    )
+  }
+  if (normalized.status === 'incomplete' || normalized.incompleteReason) {
+    const reason = normalized.incompleteReason
+      ? `，原因：${diagnosticValue(normalized.incompleteReason)}`
+      : ''
+    throw new ModelGatewayError(
+      `模型输出未完成${reason}${responseDiagnostic(normalized)}`,
+      undefined,
+      false,
+      normalized.requestId
+    )
+  }
+  if (normalized.text.trim()) return normalized.text
+  if (normalized.status === 'queued' || normalized.status === 'in_progress') {
+    throw new ModelGatewayError(
+      `模型响应尚未完成${responseDiagnostic(normalized)}`,
+      undefined,
+      false,
+      normalized.requestId
+    )
+  }
+  if (normalized.hasReasoning) {
+    throw new ModelGatewayError(
+      `模型只返回了推理内容，未生成最终回答${responseDiagnostic(normalized)}`,
+      undefined,
+      false,
+      normalized.requestId
+    )
+  }
+  if (normalized.hasToolCall) {
+    throw new ModelGatewayError(
+      `模型返回了工具调用，但没有生成文本回答${responseDiagnostic(normalized)}`,
+      undefined,
+      false,
+      normalized.requestId
+    )
+  }
+  throw new ModelGatewayError(
+    `模型响应格式不受支持或内容为空${responseDiagnostic(normalized)}`,
+    undefined,
+    false,
+    normalized.requestId
+  )
+}
+
+function normalizeChatPayload(payload: unknown): string {
+  const root = asRecord(payload)
+  if (!root) throw new ModelGatewayError('模型返回中没有可读取的文本内容')
+  const choices = Array.isArray(root.choices) ? root.choices : []
+  const choice = asRecord(choices[0])
+  const message = asRecord(choice?.message)
+  const text =
+    contentText(message?.content) ||
+    nonEmptyString(message?.refusal) ||
+    nonEmptyString(root.output_text) ||
+    ''
+  if (text.trim()) return text
+  if (nonEmptyString(message?.reasoning_content)) {
+    throw new ModelGatewayError('模型只返回了推理内容，未生成最终回答')
+  }
+  if (nonEmptyString(choice?.finish_reason) === 'length') {
+    throw new ModelGatewayError('模型输出因长度限制被截断')
+  }
+  if (choice?.tool_calls || choice?.function_call) {
+    throw new ModelGatewayError('模型返回了工具调用，但没有生成文本回答')
+  }
   throw new ModelGatewayError('模型返回中没有可读取的文本内容')
 }
 
-function extractResponsesText(payload: unknown): string {
-  const root = payload as {
-    output_text?: string
-    output?: Array<{
-      content?: Array<{
-        type?: string
-        text?: string
-        refusal?: string
-      }>
-    }>
-    choices?: Array<{ message?: { content?: string } }>
+function parseSseEvents(body: string): SseEvent[] {
+  const events: SseEvent[] = []
+  for (const block of body.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+    if (!block.trim()) continue
+    let event: string | undefined
+    const data: string[] = []
+    for (const line of block.split('\n')) {
+      if (!line || line.startsWith(':')) continue
+      const separator = line.indexOf(':')
+      const field = separator >= 0 ? line.slice(0, separator) : line
+      const value = separator >= 0 ? line.slice(separator + 1).replace(/^ /, '') : ''
+      if (field === 'event') event = value
+      if (field === 'data') data.push(value)
+    }
+    if (data.length) events.push({ event, data: data.join('\n') })
   }
-  if (typeof root.output_text === 'string' && root.output_text.trim()) return root.output_text
-  const text = (root.output ?? [])
-    .flatMap((item) => item.content ?? [])
-    .map((item) => item.text ?? item.refusal ?? '')
-    .join('')
-  if (text.trim()) return text
-  const fallback = root.choices?.[0]?.message?.content
-  if (fallback) return fallback
-  throw new ModelGatewayError('模型响应格式不受支持或内容为空')
+  return events
+}
+
+function normalizeResponsesSse(
+  body: string,
+  headerRequestId?: string
+): NormalizedResponsesPayload {
+  const events = parseSseEvents(body)
+  if (!events.length) {
+    throw new ModelGatewayError(
+      '模型服务返回了无法解析的 SSE 响应',
+      undefined,
+      false,
+      headerRequestId
+    )
+  }
+
+  const deltas = new Map<string, string>()
+  let finalPayload: unknown
+  let terminated = false
+  let streamErrorCode: string | undefined
+  let sawReasoning = false
+
+  for (const event of events) {
+    if (event.data.trim() === '[DONE]') {
+      terminated = true
+      continue
+    }
+    let payload: unknown
+    try {
+      payload = JSON.parse(event.data)
+    } catch {
+      throw new ModelGatewayError(
+        '模型服务返回了无法解析的 SSE 事件',
+        undefined,
+        false,
+        headerRequestId
+      )
+    }
+    const record = asRecord(payload)
+    if (!record) continue
+    const type = event.event ?? nonEmptyString(record.type) ?? ''
+    if (type.includes('reasoning')) sawReasoning = true
+    if (type === 'response.output_text.delta') {
+      const delta = nonEmptyString(record.delta) ?? ''
+      const key = [
+        nonEmptyString(record.item_id) ?? '',
+        typeof record.output_index === 'number' ? record.output_index : '',
+        typeof record.content_index === 'number' ? record.content_index : ''
+      ].join(':')
+      deltas.set(key, `${deltas.get(key) ?? ''}${delta}`)
+      continue
+    }
+    if (type === 'response.completed') {
+      finalPayload = record.response ?? record
+      terminated = true
+      continue
+    }
+    if (type === 'response.incomplete') {
+      finalPayload = record.response ?? record
+      terminated = true
+      continue
+    }
+    if (type === 'response.failed') {
+      finalPayload = record.response ?? record
+      terminated = true
+      continue
+    }
+    if (type === 'error' || record.error) {
+      const errorRecord = asRecord(record.error)
+      streamErrorCode =
+        nonEmptyString(errorRecord?.code) ??
+        nonEmptyString(record.code) ??
+        'stream_error'
+      terminated = true
+    }
+  }
+
+  const normalized: NormalizedResponsesPayload = finalPayload
+    ? normalizeResponsesPayload(finalPayload, headerRequestId)
+    : {
+        text: '',
+        outputTypes: [],
+        requestId: headerRequestId,
+        hasReasoning: sawReasoning,
+        hasToolCall: false
+      }
+  if (!normalized.text) normalized.text = [...deltas.values()].join('')
+  if (streamErrorCode) normalized.errorCode = streamErrorCode
+  if (!terminated) {
+    throw new ModelGatewayError(
+      '模型 SSE 响应未正常结束，缺少完成事件',
+      undefined,
+      false,
+      normalized.requestId
+    )
+  }
+  return normalized
 }
 
 function errorMessage(status: number, body: string): string {
@@ -139,7 +442,10 @@ export class ModelGateway {
     const endpoint = buildProviderEndpoint(provider)
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      Accept: 'application/json'
+      Accept:
+        provider.protocol === 'responses'
+          ? 'application/json, text/event-stream'
+          : 'application/json'
     }
     if (provider.apiKey.trim()) headers.Authorization = `Bearer ${provider.apiKey.trim()}`
     const model = request.model || provider.textModel
@@ -184,6 +490,11 @@ export class ModelGateway {
           signal
         })
         const body = await response.text()
+        const requestId =
+          response.headers.get('x-request-id') ??
+          response.headers.get('request-id') ??
+          response.headers.get('openai-request-id') ??
+          undefined
         if (
           !response.ok &&
           request.jsonMode &&
@@ -200,7 +511,8 @@ export class ModelGateway {
           const error = new ModelGatewayError(
             errorMessage(response.status, body),
             response.status,
-            retryable
+            retryable,
+            requestId
           )
           if (retryable && attempt < 2) {
             const retryAfter = Number(response.headers.get('retry-after') ?? 0)
@@ -209,17 +521,39 @@ export class ModelGateway {
           }
           throw error
         }
+        const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+        const looksLikeSse =
+          contentType.includes('text/event-stream') ||
+          /^\s*(?:event|data):/m.test(body.slice(0, 1024))
+        if (provider.protocol === 'responses' && looksLikeSse) {
+          const normalized = normalizeResponsesSse(body, requestId)
+          return {
+            text: requireResponsesText(normalized),
+            requestId: normalized.requestId
+          }
+        }
+
         let parsed: unknown
         try {
           parsed = JSON.parse(body)
         } catch {
-          throw new ModelGatewayError('模型服务返回了非 JSON 响应')
+          throw new ModelGatewayError(
+            '模型服务返回了非 JSON 响应',
+            undefined,
+            false,
+            requestId
+          )
         }
-        const text =
-          provider.protocol === 'responses' ? extractResponsesText(parsed) : extractChatText(parsed)
+        if (provider.protocol === 'responses') {
+          const normalized = normalizeResponsesPayload(parsed, requestId)
+          return {
+            text: requireResponsesText(normalized),
+            requestId: normalized.requestId
+          }
+        }
         return {
-          text,
-          requestId: response.headers.get('x-request-id') ?? undefined
+          text: normalizeChatPayload(parsed),
+          requestId
         }
       } catch (error) {
         if (request.signal?.aborted) throw new DOMException('已取消', 'AbortError')

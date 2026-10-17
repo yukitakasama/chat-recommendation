@@ -6,15 +6,15 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const oldInstaller = path.resolve(
-  process.argv[2] || path.join('release', 'ChatInsight-1.3.0-x64.exe')
+  process.argv[2] || path.join('release', 'ChatInsight-1.3.1-x64.exe')
 )
 const newInstaller = path.resolve(
-  process.argv[3] || path.join('release', 'ChatInsight-1.3.1-x64.exe')
+  process.argv[3] || path.join('release', 'ChatInsight-1.3.2-x64.exe')
 )
 const password = 'UpgradePreservation123'
 const recoveredPassword = 'UpgradeRecovered456'
 const syntheticApiKey = 'upgrade-test-placeholder-key'
-const importedMessage = '升级前写入的聊天记录必须在 v1.3.1 中保持不变'
+const importedMessage = '升级前写入的聊天记录必须在 v1.3.2 中保持不变'
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -177,7 +177,7 @@ async function main() {
 
     appHandle = await openApp(executable)
     const restored = await unlockAndReadData(appHandle.page, created.friendId, created.providerId)
-    assert(restored.state.version === '1.3.1', 'Updated application version is not 1.3.1')
+    assert(restored.state.version === '1.3.2', 'Updated application version is not 1.3.2')
     assert(restored.friend, 'Imported friend was lost during the update')
     assert(restored.messageCount === 2, 'Imported chat messages were lost during the update')
     assert(
@@ -195,7 +195,7 @@ async function main() {
       created.friendId,
       created.providerId
     )
-    assert(recovered.state.version === '1.3.1', 'Recovered application version is not 1.3.1')
+    assert(recovered.state.version === '1.3.2', 'Recovered application version is not 1.3.2')
     assert(recovered.friend, 'Recovery code could not access the imported friend')
     assert(recovered.messageCount === 2, 'Recovery code could not access imported messages')
     assert(
@@ -205,7 +205,7 @@ async function main() {
     assert(recovered.provider?.hasApiKey, 'Recovery code could not access the saved credential')
 
     process.stdout.write(
-      'Upgrade preservation passed: imported messages, privacy password, recovery code, and API credential retained in v1.3.1.\n'
+      'Upgrade preservation passed: imported messages, privacy password, recovery code, and API credential retained in v1.3.2.\n'
     )
   } finally {
     if (appHandle) await appHandle.electronApp.close()

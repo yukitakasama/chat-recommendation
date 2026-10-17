@@ -1,7 +1,11 @@
 import http from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ProviderSecret } from '../../src/main/ai/model-gateway'
-import { extractJsonObject, ModelGateway } from '../../src/main/ai/model-gateway'
+import {
+  extractJsonObject,
+  ModelGateway,
+  normalizeResponsesPayload
+} from '../../src/main/ai/model-gateway'
 
 const servers: http.Server[] = []
 
@@ -23,6 +27,14 @@ function provider(
     createdAt: now,
     updatedAt: now
   }
+}
+
+async function listen(server: http.Server): Promise<number> {
+  servers.push(server)
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('No test port')
+  return address.port
 }
 
 afterEach(async () => {
@@ -96,6 +108,133 @@ describe('model gateway', () => {
     })
     expect(result.text).toContain('summary')
     expect(attempts).toBe(2)
+  })
+
+  it('normalizes standard, wrapped, and simplified Responses payloads', () => {
+    const standard = {
+      id: 'resp_standard',
+      status: 'completed',
+      output: [
+        { type: 'reasoning', summary: [{ type: 'summary_text', text: 'private reasoning' }] },
+        {
+          type: 'message',
+          content: [{ type: 'output_text', text: '{"summary":"ok"}' }]
+        }
+      ]
+    }
+    expect(normalizeResponsesPayload(standard)).toMatchObject({
+      text: '{"summary":"ok"}',
+      status: 'completed',
+      outputTypes: ['reasoning', 'message'],
+      hasReasoning: true
+    })
+    expect(normalizeResponsesPayload({ response: standard }).text).toBe('{"summary":"ok"}')
+    expect(
+      normalizeResponsesPayload({
+        output: [{ type: 'message', text: '{"summary":"direct"}' }]
+      }).text
+    ).toBe('{"summary":"direct"}')
+    expect(
+      normalizeResponsesPayload({
+        output: [{ type: 'message', content: '{"summary":"string-content"}' }]
+      }).text
+    ).toBe('{"summary":"string-content"}')
+    expect(
+      normalizeResponsesPayload({
+        choices: [{ message: { content: [{ type: 'text', text: '{"summary":"chat-array"}' }] } }]
+      }).text
+    ).toBe('{"summary":"chat-array"}')
+  })
+
+  it('reports reasoning-only and incomplete HTTP 200 responses precisely', async () => {
+    const reasoningServer = http.createServer((_request, response) => {
+      response.setHeader('content-type', 'application/json')
+      response.end(
+        JSON.stringify({
+          id: 'resp_reasoning',
+          status: 'completed',
+          output: [{ type: 'reasoning', summary: [{ type: 'summary_text', text: 'no final' }] }]
+        })
+      )
+    })
+    const reasoningPort = await listen(reasoningServer)
+    await expect(
+      new ModelGateway().request(provider(reasoningPort, 'responses'), {
+        system: 'test',
+        prompt: 'hello'
+      })
+    ).rejects.toThrow('模型只返回了推理内容')
+
+    const incompleteServer = http.createServer((_request, response) => {
+      response.setHeader('content-type', 'application/json')
+      response.end(
+        JSON.stringify({
+          id: 'resp_incomplete',
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output: []
+        })
+      )
+    })
+    const incompletePort = await listen(incompleteServer)
+    await expect(
+      new ModelGateway().request(provider(incompletePort, 'responses'), {
+        system: 'test',
+        prompt: 'hello'
+      })
+    ).rejects.toThrow('模型输出未完成')
+  })
+
+  it('aggregates Responses SSE text and final completion events', async () => {
+    const server = http.createServer((_request, response) => {
+      response.setHeader('content-type', 'text/event-stream')
+      response.end(
+        [
+          'event: response.output_text.delta',
+          'data: {"type":"response.output_text.delta","item_id":"item_1","output_index":0,"content_index":0,"delta":"{\\"ok\\":"}',
+          '',
+          'event: response.output_text.delta',
+          'data: {"type":"response.output_text.delta","item_id":"item_1","output_index":0,"content_index":0,"delta":"true}"}',
+          '',
+          'event: response.completed',
+          'data: {"type":"response.completed","response":{"id":"resp_sse","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\\"ok\\":true}"}]}]}}',
+          ''
+        ].join('\n')
+      )
+    })
+    const port = await listen(server)
+    const result = await new ModelGateway().request(provider(port, 'responses'), {
+      system: 'test',
+      prompt: 'hello'
+    })
+    expect(result.text).toBe('{"ok":true}')
+    expect(result.requestId).toBe('resp_sse')
+  })
+
+  it('normalizes Chat Completions content arrays to plain text', async () => {
+    const server = http.createServer((_request, response) => {
+      response.setHeader('content-type', 'application/json')
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: [
+                  { type: 'text', text: 'hello ' },
+                  { type: 'text', text: 'world' }
+                ]
+              }
+            }
+          ]
+        })
+      )
+    })
+    const port = await listen(server)
+    const result = await new ModelGateway().request(provider(port, 'chat_completions'), {
+      system: 'test',
+      prompt: 'hello'
+    })
+    expect(result.text).toBe('hello world')
   })
 
   it('retries Chat Completions without response_format when a compatible endpoint rejects it', async () => {
