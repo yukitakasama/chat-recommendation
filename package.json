@@ -1,0 +1,72 @@
+{
+  "name": "chat-insight",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Windows x64 local chat analysis desktop application",
+  "main": "./out/main/index.js",
+  "author": "ChatInsight",
+  "license": "UNLICENSED",
+  "scripts": {
+    "postinstall": "node scripts/install-electron.cjs && electron-builder install-app-deps",
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "bun run build && playwright test",
+    "benchmark:import": "bun scripts/benchmark-import.ts",
+    "rebuild": "electron-builder install-app-deps",
+    "dist": "bun run build && electron-builder --win",
+    "dist:dir": "bun run build && electron-builder --dir"
+  },
+  "packageManager": "bun@1.3.14",
+  "trustedDependencies": [
+    "electron",
+    "better-sqlite3-multiple-ciphers",
+    "sharp"
+  ],
+  "engines": {
+    "node": ">=22",
+    "bun": ">=1.3"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-switch": "^1.4.1",
+    "@radix-ui/react-tabs": "^1.2.1",
+    "@radix-ui/react-tooltip": "^1.4.1",
+    "better-sqlite3-multiple-ciphers": "^13.0.3",
+    "chardet": "^2.2.0",
+    "cheerio": "^1.2.0",
+    "clsx": "^2.1.1",
+    "csv-parse": "^7.0.3",
+    "iconv-lite": "^0.7.3",
+    "lucide-react": "^1.59.0",
+    "mailparser": "^3.9.40",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sharp": "^0.35.5",
+    "zod": "^4.6.7",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/mailparser": "^3.9.0",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "44.9.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^6.0.0",
+    "jsdom": "^30.1.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  }
+}

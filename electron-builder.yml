@@ -1,0 +1,37 @@
+appId: com.chatinsight.desktop
+productName: ChatInsight
+copyright: Copyright © 2026 ChatInsight
+directories:
+  output: release
+extraResources:
+  - from: build/icon.png
+    to: icon.png
+files:
+  - out/**
+  - package.json
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3-multiple-ciphers/**
+  - node_modules/sharp/**
+  - node_modules/@img/**
+npmRebuild: true
+win:
+  executableName: ChatInsight
+  icon: build/icon.png
+  target:
+    - target: zip
+      arch:
+        - x64
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ChatInsight
+  deleteAppDataOnUninstall: false

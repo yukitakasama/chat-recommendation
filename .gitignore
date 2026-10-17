@@ -1,0 +1,39 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.keystore
+*.jks
+
+# Dependencies and virtual environments
+node_modules/
+venv/
+.venv/
+
+# Build output and caches
+dist/
+out/
+release/
+target/
+data/
+coverage/
+playwright-report/
+test-results/
+.cache/
+.vite/
+.turbo/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+*.log
+.runtime-test/
+
+# Local configuration and OS metadata
+*.local
+.DS_Store
+Thumbs.db
