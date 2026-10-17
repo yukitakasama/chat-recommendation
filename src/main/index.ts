@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, Menu, powerMonitor, session } from 'electron'
 import path from 'node:path'
 import { registerIpc } from './ipc'
-import { getDataPaths, ensureDataDirectories } from './paths'
+import { ensureDataDirectories, getDataPaths, recoverInterruptedUpdate } from './paths'
 import { VaultService } from './vault'
 import { ImportService } from './import-service'
 import { ModelGateway } from './ai/model-gateway'
@@ -73,6 +73,12 @@ if (!singleInstance) {
       return
     }
     const paths = getDataPaths()
+    const recovery = recoverInterruptedUpdate(paths)
+    if (recovery.status === 'conflict' || recovery.status === 'failed') {
+      dialog.showErrorBox('更新数据恢复失败', recovery.message)
+      app.quit()
+      return
+    }
     if (!ensureDataDirectories(paths)) {
       dialog.showErrorBox(
         '无法写入应用目录',

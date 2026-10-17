@@ -28,6 +28,8 @@
 
 应用数据固定存放在程序 exe 同级 `data` 目录。目录不可写时应用会阻止创建保险库，不会静默回退到 AppData。便携使用时关闭应用后复制整个程序目录；安装版默认采用每用户安装，安装目录可自行选择，但同样必须可写。
 
+NSIS 覆盖安装会在调用旧卸载器前把整个 `data` 目录原子移动到安装目录外的 `ChatInsight-data-update-backup`，新版文件写入完成后再原子恢复。应用启动时也会检测中断更新留下的备份；若备份与现有数据目录同时存在，应用会停止启动并显示两个路径，避免覆盖密码材料或凭据。覆盖更新存在旧保险库时不能更换安装目录。
+
 ## 隐私边界
 
 聊天记录可能包含第三方隐私。导入前应确认你有权处理这些内容。关系判断是有限证据下的行为信号推断，不是心理诊断或事实认定。应用基础边界禁止操控、胁迫、冒充、情感勒索和无视明确拒绝；人设中的边界说明不能关闭这些基础约束。
@@ -65,12 +67,14 @@ ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ bun install
 bun run typecheck
 bun run test
 bun run test:e2e
+bun run verify:upgrade
 bun run benchmark:import
 ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ bun run dist
 ```
 
 - `bun run test`：加密、解析器、公共 schema 和双协议模型网关单元测试。
 - `bun run test:e2e`：真实 Electron 中建库、通过 IPC 导入、加密落盘、模拟模型分析、历史结果渲染与明文泄漏检查。
+- `bun run verify:upgrade`：使用本地 v1.2.0 与 v1.3.0 安装包验证覆盖更新后，原密码材料和加密模型凭据仍然存在。
 - `bun run verify:qqchat <JSON路径>`：用真实 QQChatExporter 导出核对发送者、资源引用、贴纸映射与缺失资源告警。
 - `bun run benchmark:import`：合成 50,000 条消息和 500 张图片，验证本地解析、哈希、加密和提交耗时。
 - `bun run dist`：生成 `release` 下的便携 ZIP 与 NSIS 安装包。
