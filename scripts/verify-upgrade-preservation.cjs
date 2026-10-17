@@ -6,15 +6,15 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const oldInstaller = path.resolve(
-  process.argv[2] || path.join('release', 'ChatInsight-1.3.3-x64.exe')
+  process.argv[2] || path.join('release', 'ChatInsight-1.3.4-x64.exe')
 )
 const newInstaller = path.resolve(
-  process.argv[3] || path.join('release', 'ChatInsight-1.3.4-x64.exe')
+  process.argv[3] || path.join('release', 'ChatInsight-1.3.5-x64.exe')
 )
 const password = 'UpgradePreservation123'
 const recoveredPassword = 'UpgradeRecovered456'
 const syntheticApiKey = 'upgrade-test-placeholder-key'
-const importedMessage = '升级前写入的聊天记录必须在 v1.3.4 中保持不变'
+const importedMessage = '升级前写入的聊天记录必须在 v1.3.5 中保持不变'
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -38,9 +38,10 @@ function install(installer, installDir) {
   assert(result.status === 0, `Installer exited with code ${result.status}: ${installer}`)
 }
 
-async function openApp(executablePath) {
+async function openApp(executablePath, chromiumUserData) {
   const electronApp = await electron.launch({
     executablePath,
+    args: [`--user-data-dir=${chromiumUserData}`],
     env: {
       ...process.env,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
@@ -146,7 +147,10 @@ async function main() {
     const executable = path.join(installDir, 'ChatInsight.exe')
     assert(fs.existsSync(executable), 'Old application executable was not installed')
 
-    appHandle = await openApp(executable)
+    appHandle = await openApp(
+      executable,
+      fs.mkdtempSync(path.join(tempRoot, 'chromium-old-'))
+    )
     const created = await createVaultData(appHandle.page, importPath)
     assert(created.recoveryCode.startsWith('CI-'), 'Recovery code was not created')
     assert(created.importedMessages === 2, 'Initial chat import did not contain two messages')
@@ -175,9 +179,12 @@ async function main() {
       'Update backup was not restored'
     )
 
-    appHandle = await openApp(executable)
+    appHandle = await openApp(
+      executable,
+      fs.mkdtempSync(path.join(tempRoot, 'chromium-updated-'))
+    )
     const restored = await unlockAndReadData(appHandle.page, created.friendId, created.providerId)
-    assert(restored.state.version === '1.3.4', 'Updated application version is not 1.3.4')
+    assert(restored.state.version === '1.3.5', 'Updated application version is not 1.3.5')
     assert(restored.friend, 'Imported friend was lost during the update')
     assert(restored.messageCount === 2, 'Imported chat messages were lost during the update')
     assert(
@@ -196,14 +203,17 @@ async function main() {
     )
 
     await appHandle.electronApp.close()
-    appHandle = await openApp(executable)
+    appHandle = await openApp(
+      executable,
+      fs.mkdtempSync(path.join(tempRoot, 'chromium-recovered-'))
+    )
     const recovered = await recoverAndReadData(
       appHandle.page,
       created.recoveryCode,
       created.friendId,
       created.providerId
     )
-    assert(recovered.state.version === '1.3.4', 'Recovered application version is not 1.3.4')
+    assert(recovered.state.version === '1.3.5', 'Recovered application version is not 1.3.5')
     assert(recovered.friend, 'Recovery code could not access the imported friend')
     assert(recovered.messageCount === 2, 'Recovery code could not access imported messages')
     assert(
@@ -221,7 +231,7 @@ async function main() {
     )
 
     process.stdout.write(
-      'Upgrade preservation passed: imported messages, privacy password, recovery code, and API credential retained in v1.3.4.\n'
+      'Upgrade preservation passed: imported messages, privacy password, recovery code, and API credential retained in v1.3.5.\n'
     )
   } finally {
     if (appHandle) await appHandle.electronApp.close()

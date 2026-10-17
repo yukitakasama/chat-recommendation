@@ -28,6 +28,8 @@ export interface ModelRequest {
 export interface ModelResponse {
   text: string
   requestId?: string
+  incomplete?: boolean
+  incompleteReason?: string
 }
 
 export class ModelGatewayError extends Error {
@@ -36,7 +38,8 @@ export class ModelGatewayError extends Error {
     readonly status?: number,
     readonly retryable = false,
     readonly requestId?: string,
-    readonly code?: string
+    readonly code?: string,
+    readonly partialText?: string
   ) {
     super(message)
     this.name = 'ModelGatewayError'
@@ -238,14 +241,22 @@ function requireResponsesText(normalized: NormalizedResponsesPayload): string {
     const reason = normalized.incompleteReason
       ? `，原因：${diagnosticValue(normalized.incompleteReason)}`
       : ''
+    if (normalized.incompleteReason === 'max_output_tokens') {
+      throw new ModelGatewayError(
+        `模型输出未完成${reason}${responseDiagnostic(normalized)}`,
+        undefined,
+        false,
+        normalized.requestId,
+        'max_output_tokens',
+        normalized.text
+      )
+    }
     throw new ModelGatewayError(
       `模型输出未完成${reason}${responseDiagnostic(normalized)}`,
       undefined,
       false,
       normalized.requestId,
-      normalized.incompleteReason === 'max_output_tokens'
-        ? 'max_output_tokens'
-        : 'incomplete'
+      'incomplete'
     )
   }
   if (normalized.text.trim()) return normalized.text
@@ -564,7 +575,10 @@ export class ModelGateway {
           const normalized = normalizeResponsesSse(body, requestId)
           return {
             text: requireResponsesText(normalized),
-            requestId: normalized.requestId
+            requestId: normalized.requestId,
+            incomplete:
+              normalized.status === 'incomplete' || Boolean(normalized.incompleteReason),
+            incompleteReason: normalized.incompleteReason
           }
         }
 
@@ -583,7 +597,10 @@ export class ModelGateway {
           const normalized = normalizeResponsesPayload(parsed, requestId)
           return {
             text: requireResponsesText(normalized),
-            requestId: normalized.requestId
+            requestId: normalized.requestId,
+            incomplete:
+              normalized.status === 'incomplete' || Boolean(normalized.incompleteReason),
+            incompleteReason: normalized.incompleteReason
           }
         }
         return {
@@ -608,6 +625,14 @@ export class ModelGateway {
             outputTokenBudget = nextBudget
             budgetRetries += 1
             continue
+          }
+          if (error.partialText?.trim()) {
+            return {
+              text: error.partialText,
+              requestId: error.requestId,
+              incomplete: true,
+              incompleteReason: 'max_output_tokens'
+            }
           }
         }
         lastError = error

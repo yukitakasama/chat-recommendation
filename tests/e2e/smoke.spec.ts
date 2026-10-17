@@ -416,6 +416,8 @@ ${secretText}
     )
     expect(imagePreflight.imageCount).toBe(1)
     expect(imagePreflight.includesImages).toBe(true)
+    expect(imagePreflight.contextStrategy).toBe('single_request')
+    expect(imagePreflight.summaryChunkCount).toBe(0)
 
     const generatedStyle = await page.evaluate(
       async ({ friendId, providerId }) => {

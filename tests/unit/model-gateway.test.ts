@@ -263,6 +263,38 @@ describe('model gateway', () => {
     expect(streamFlags).toEqual([true, true])
   })
 
+  it('returns partial Responses text when the configured maximum cannot be increased', async () => {
+    const server = http.createServer((_request, response) => {
+      response.setHeader('content-type', 'application/json')
+      response.end(
+        JSON.stringify({
+          id: 'resp_partial',
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output: [
+            { type: 'reasoning', summary: [] },
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: '{"kind":"love"' }]
+            }
+          ]
+        })
+      )
+    })
+    const port = await listen(server)
+    const result = await new ModelGateway().request(
+      provider(port, 'responses', { maxOutputTokens: 64 }),
+      {
+        system: 'test',
+        prompt: 'hello',
+        maxOutputTokens: 100_000
+      }
+    )
+    expect(result.text).toBe('{"kind":"love"')
+    expect(result.incomplete).toBe(true)
+    expect(result.incompleteReason).toBe('max_output_tokens')
+  })
+
   it('uses a reasoning-safe output budget for the Responses connection test', async () => {
     let requestedBudget = 0
     let requestedStream = false

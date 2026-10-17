@@ -392,6 +392,14 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
                 <strong>{preflight.maxOutputTokens.toLocaleString('zh-CN')} tokens</strong>
               </span>
               <span>
+                <small>上下文策略</small>
+                <strong>
+                  {preflight.contextStrategy === 'single_request'
+                    ? '单次完整请求'
+                    : `${preflight.summaryChunkCount} 段分层摘要`}
+                </strong>
+              </span>
+              <span>
                 <small>图片</small>
                 <strong>{preflight.imageCount} 项</strong>
               </span>

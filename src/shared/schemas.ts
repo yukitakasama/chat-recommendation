@@ -338,6 +338,8 @@ export const AnalysisPreflightSchema = z.object({
   maxInputTokens: z.number().int().positive(),
   maxOutputTokens: z.number().int().positive(),
   estimatedInputTokens: z.number().int().nonnegative(),
+  contextStrategy: z.enum(['single_request', 'hierarchical_summary']),
+  summaryChunkCount: z.number().int().nonnegative(),
   messageCount: z.number().int(),
   characterCount: z.number().int(),
   imageCount: z.number().int(),

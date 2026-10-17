@@ -1,6 +1,6 @@
 {
   "name": "chat-insight",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "private": true,
   "description": "Windows x64 local chat analysis desktop application",
   "main": "./out/main/index.js",
