@@ -27,6 +27,7 @@ import {
   ModelGateway,
   ModelGatewayError
 } from './model-gateway'
+import { estimateTextTokens } from '../../shared/token-estimate'
 import { normalizeLocalImage, prepareImageForModel } from './image-utils'
 import { extractFileEvidence } from './file-content'
 
@@ -333,6 +334,9 @@ export class AnalysisService {
       throw new Error('该范围内没有可分析的聊天记录、图片或文件附件')
     }
     const characterCount = messages.reduce((sum, item) => sum + item.text.length, 0)
+    const estimatedInputTokens =
+      messages.reduce((sum, message) => sum + estimateTextTokens(message.text), 0) +
+      estimateTextTokens(input.supplementalQuestion)
     const summaryCalls = estimateHistorySummaryCalls(messages)
     const imageCalls = Math.ceil(imageAssets.length / IMAGE_BATCH_SIZE)
     const estimatedRequests = summaryCalls + imageCalls + 1
@@ -350,6 +354,11 @@ export class AnalysisService {
     if (characterCount > 200_000) {
       warnings.push('历史较长，将产生多次分层摘要请求，请留意耗时和费用。')
     }
+    if (estimatedInputTokens > provider.maxInputTokens) {
+      warnings.push(
+        `聊天文本约 ${estimatedInputTokens.toLocaleString()} tokens，超过当前服务的输入上限 ${provider.maxInputTokens.toLocaleString()}；应用会先压缩历史，但最终请求仍可能被本地限额阻止。`
+      )
+    }
     if (input.includeImages) {
       warnings.push(`本次会把 ${imageAssets.length} 张图片发送到 ${provider.baseUrl} 的视觉模型。`)
     }
@@ -364,6 +373,9 @@ export class AnalysisService {
       providerName: provider.name,
       protocol: provider.protocol,
       endpoint: buildProviderEndpoint(provider),
+      maxInputTokens: provider.maxInputTokens,
+      maxOutputTokens: provider.maxOutputTokens,
+      estimatedInputTokens,
       messageCount: messages.length,
       characterCount,
       imageCount: imageAssets.length,
@@ -603,7 +615,7 @@ ${supplementalQuestionPrompt(supplementalQuestion)}`
         system,
         prompt,
         model: provider.textModel,
-        maxOutputTokens: 6000,
+        maxOutputTokens: provider.maxOutputTokens,
         signal: controller.signal,
         jsonMode: true
       })
@@ -629,7 +641,7 @@ ${baseEvidenceInstruction(allowedMessageIds, allowedAssetIds)}
 ${outputPrompt(mode)}
 ${supplementalQuestionPrompt(supplementalQuestion)}`,
           model: provider.textModel,
-          maxOutputTokens: 6000,
+          maxOutputTokens: provider.maxOutputTokens,
           signal: controller.signal,
           jsonMode: true
         })

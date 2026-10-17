@@ -11,7 +11,8 @@ const servers: http.Server[] = []
 
 function provider(
   port: number,
-  protocol: 'chat_completions' | 'responses'
+  protocol: 'chat_completions' | 'responses',
+  overrides: Partial<ProviderSecret> = {}
 ): ProviderSecret {
   const now = new Date().toISOString()
   return {
@@ -22,10 +23,13 @@ function provider(
     apiKey: 'secret',
     textModel: 'text-model',
     visionModel: 'vision-model',
+    maxInputTokens: 350_000,
+    maxOutputTokens: 200_000,
     isDefault: true,
     hasApiKey: true,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    ...overrides
   }
 }
 
@@ -282,8 +286,41 @@ describe('model gateway', () => {
     })
     const port = await listen(server)
     await new ModelGateway().test(provider(port, 'responses'))
-    expect(requestedBudget).toBe(1024)
+    expect(requestedBudget).toBe(8192)
     expect(requestedStream).toBe(true)
+  })
+
+  it('clamps output tokens to the provider limit and rejects oversized input locally', async () => {
+    let requestedBudget = 0
+    const server = http.createServer((request, response) => {
+      let body = ''
+      request.on('data', (chunk) => {
+        body += chunk
+      })
+      request.on('end', () => {
+        const payload = JSON.parse(body) as Record<string, unknown>
+        requestedBudget = Number(payload.max_tokens ?? payload.max_output_tokens)
+        response.setHeader('content-type', 'application/json')
+        response.end(JSON.stringify({ choices: [{ message: { content: 'OK' } }] }))
+      })
+    })
+    const port = await listen(server)
+    await new ModelGateway().request(
+      provider(port, 'chat_completions', { maxOutputTokens: 2000 }),
+      {
+        system: 'test',
+        prompt: 'hello',
+        maxOutputTokens: 100_000
+      }
+    )
+    expect(requestedBudget).toBe(2000)
+
+    await expect(
+      new ModelGateway().request(provider(1, 'responses', { maxInputTokens: 1 }), {
+        system: 'test',
+        prompt: '超出本地输入上限'
+      })
+    ).rejects.toThrow('超过当前服务上限')
   })
 
   it('normalizes Chat Completions content arrays to plain text', async () => {

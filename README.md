@@ -11,6 +11,7 @@
 - 多人设新建、编辑、复制、删除与每次分析自由选择。
 - JSON 与 Markdown/SKILL.md 风格导入；从全部好友或指定好友的本人消息生成风格。
 - Chat Completions 与 Responses API 双协议；文本和视觉模型分别配置。
+- 每个模型服务可配置输入/输出 token 上限，默认 350000 / 200000。
 - 全量历史分块摘要、近期原文、图片/表情观察、PDF 与文本附件提取和证据引用；多批次调用前预检与独立授权。
 - 分析时可附加一个可选补充问题，与默认问题在同一次模型请求中回答，并分别保存默认结果和补充回答。
 - 加密分析历史、Markdown/JSON 导出、锁定保险库与系统锁屏自动锁定。
@@ -75,7 +76,7 @@ ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ bun run dist
 
 - `bun run test`：加密、解析器、公共 schema 和双协议模型网关单元测试。
 - `bun run test:e2e`：真实 Electron 中建库、通过 IPC 导入、加密落盘、模拟模型分析、历史结果渲染与明文泄漏检查。
-- `bun run verify:upgrade`：使用本地 v1.3.2 与 v1.3.3 安装包验证覆盖更新后，已导入消息、隐私密码、恢复码和加密模型凭据仍然可用。
+- `bun run verify:upgrade`：使用本地 v1.3.3 与 v1.3.4 安装包验证覆盖更新后，已导入消息、隐私密码、恢复码和加密模型凭据仍然可用。
 - `bun run verify:qqchat <JSON路径>`：用真实 QQChatExporter 导出核对发送者、资源引用、贴纸映射与缺失资源告警。
 - `bun run benchmark:import`：合成 50,000 条消息和 500 张图片，验证本地解析、哈希、加密和提交耗时。
 - `bun run dist`：生成 `release` 下的便携 ZIP 与 NSIS 安装包。

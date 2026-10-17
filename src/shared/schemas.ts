@@ -279,6 +279,11 @@ export const StyleProfileSchema = z.object({
 
 export const ProviderProtocolSchema = z.enum(['chat_completions', 'responses'])
 
+export const DEFAULT_PROVIDER_MAX_INPUT_TOKENS = 350_000
+export const DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS = 200_000
+
+const ProviderTokenLimitSchema = z.number().int().min(1).max(2_000_000)
+
 export const ProviderProfileSchema = z.object({
   id: z.string(),
   name: z.string().min(1).max(100),
@@ -286,6 +291,8 @@ export const ProviderProfileSchema = z.object({
   baseUrl: z.string().url(),
   textModel: z.string().min(1),
   visionModel: z.string().default(''),
+  maxInputTokens: ProviderTokenLimitSchema.default(DEFAULT_PROVIDER_MAX_INPUT_TOKENS),
+  maxOutputTokens: ProviderTokenLimitSchema.default(DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS),
   isDefault: z.boolean(),
   hasApiKey: z.boolean(),
   createdAt: z.string(),
@@ -300,6 +307,8 @@ export const ProviderInputSchema = z.object({
   apiKey: z.string().max(5000).optional(),
   textModel: z.string().min(1),
   visionModel: z.string().default(''),
+  maxInputTokens: ProviderTokenLimitSchema.default(DEFAULT_PROVIDER_MAX_INPUT_TOKENS),
+  maxOutputTokens: ProviderTokenLimitSchema.default(DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS),
   isDefault: z.boolean()
 })
 
@@ -326,6 +335,9 @@ export const AnalysisPreflightSchema = z.object({
   providerName: z.string(),
   protocol: ProviderProtocolSchema,
   endpoint: z.string(),
+  maxInputTokens: z.number().int().positive(),
+  maxOutputTokens: z.number().int().positive(),
+  estimatedInputTokens: z.number().int().nonnegative(),
   messageCount: z.number().int(),
   characterCount: z.number().int(),
   imageCount: z.number().int(),

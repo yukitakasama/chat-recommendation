@@ -393,6 +393,8 @@ ${secretText}
       }
     }, `http://127.0.0.1:${address.port}/v1`)
 
+    expect(configured.provider.maxInputTokens).toBe(350_000)
+    expect(configured.provider.maxOutputTokens).toBe(200_000)
     const imagePreflight = await page.evaluate(
       async ({ friendId, providerId, personaId, modeId }) => {
         return window.api.analysis.preflight({

@@ -3,6 +3,7 @@ import {
   AnalysisModeInputSchema,
   AnalysisPreflightInputSchema,
   LoveAnalysisResultSchema,
+  ProviderInputSchema,
   StyleSkillSchema,
   SupplementalAnswerResultSchema
 } from '../../src/shared/schemas'
@@ -134,5 +135,33 @@ describe('public data schemas', () => {
         uncertainty: []
       }).success
     ).toBe(false)
+  })
+
+  it('defaults and validates configurable provider token limits', () => {
+    const parsed = ProviderInputSchema.parse({
+      name: '兼容模型',
+      protocol: 'responses',
+      baseUrl: 'https://example.com/v1',
+      textModel: 'text-model',
+      isDefault: true
+    })
+    expect(parsed.maxInputTokens).toBe(350_000)
+    expect(parsed.maxOutputTokens).toBe(200_000)
+    expect(
+      ProviderInputSchema.safeParse({
+        ...parsed,
+        maxInputTokens: 0
+      }).success
+    ).toBe(false)
+    expect(
+      ProviderInputSchema.parse({
+        ...parsed,
+        maxInputTokens: 500_000,
+        maxOutputTokens: 300_000
+      })
+    ).toMatchObject({
+      maxInputTokens: 500_000,
+      maxOutputTokens: 300_000
+    })
   })
 })

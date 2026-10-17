@@ -6,15 +6,15 @@ const path = require('node:path')
 const { spawnSync } = require('node:child_process')
 
 const oldInstaller = path.resolve(
-  process.argv[2] || path.join('release', 'ChatInsight-1.3.2-x64.exe')
+  process.argv[2] || path.join('release', 'ChatInsight-1.3.3-x64.exe')
 )
 const newInstaller = path.resolve(
-  process.argv[3] || path.join('release', 'ChatInsight-1.3.3-x64.exe')
+  process.argv[3] || path.join('release', 'ChatInsight-1.3.4-x64.exe')
 )
 const password = 'UpgradePreservation123'
 const recoveredPassword = 'UpgradeRecovered456'
 const syntheticApiKey = 'upgrade-test-placeholder-key'
-const importedMessage = '升级前写入的聊天记录必须在 v1.3.3 中保持不变'
+const importedMessage = '升级前写入的聊天记录必须在 v1.3.4 中保持不变'
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
@@ -177,7 +177,7 @@ async function main() {
 
     appHandle = await openApp(executable)
     const restored = await unlockAndReadData(appHandle.page, created.friendId, created.providerId)
-    assert(restored.state.version === '1.3.3', 'Updated application version is not 1.3.3')
+    assert(restored.state.version === '1.3.4', 'Updated application version is not 1.3.4')
     assert(restored.friend, 'Imported friend was lost during the update')
     assert(restored.messageCount === 2, 'Imported chat messages were lost during the update')
     assert(
@@ -186,6 +186,14 @@ async function main() {
     )
     assert(restored.provider, 'Provider credential record was lost during the update')
     assert(restored.provider.hasApiKey, 'Provider API key was lost during the update')
+    assert(
+      restored.provider.maxInputTokens === 350_000,
+      'Migrated provider input token limit is not 350000'
+    )
+    assert(
+      restored.provider.maxOutputTokens === 200_000,
+      'Migrated provider output token limit is not 200000'
+    )
 
     await appHandle.electronApp.close()
     appHandle = await openApp(executable)
@@ -195,7 +203,7 @@ async function main() {
       created.friendId,
       created.providerId
     )
-    assert(recovered.state.version === '1.3.3', 'Recovered application version is not 1.3.3')
+    assert(recovered.state.version === '1.3.4', 'Recovered application version is not 1.3.4')
     assert(recovered.friend, 'Recovery code could not access the imported friend')
     assert(recovered.messageCount === 2, 'Recovery code could not access imported messages')
     assert(
@@ -203,9 +211,17 @@ async function main() {
       'Recovery code produced changed chat data'
     )
     assert(recovered.provider?.hasApiKey, 'Recovery code could not access the saved credential')
+    assert(
+      recovered.provider?.maxInputTokens === 350_000,
+      'Recovery code could not access the migrated input token limit'
+    )
+    assert(
+      recovered.provider?.maxOutputTokens === 200_000,
+      'Recovery code could not access the migrated output token limit'
+    )
 
     process.stdout.write(
-      'Upgrade preservation passed: imported messages, privacy password, recovery code, and API credential retained in v1.3.3.\n'
+      'Upgrade preservation passed: imported messages, privacy password, recovery code, and API credential retained in v1.3.4.\n'
     )
   } finally {
     if (appHandle) await appHandle.electronApp.close()

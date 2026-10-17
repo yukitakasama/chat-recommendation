@@ -381,6 +381,17 @@ export function AnalysisPanel({ onFinished }: { onFinished: () => void }): React
                 <strong>{preflight.characterCount.toLocaleString('zh-CN')}</strong>
               </span>
               <span>
+                <small>输入预算</small>
+                <strong>
+                  {preflight.estimatedInputTokens.toLocaleString('zh-CN')} /{' '}
+                  {preflight.maxInputTokens.toLocaleString('zh-CN')} tokens
+                </strong>
+              </span>
+              <span>
+                <small>输出上限</small>
+                <strong>{preflight.maxOutputTokens.toLocaleString('zh-CN')} tokens</strong>
+              </span>
+              <span>
                 <small>图片</small>
                 <strong>{preflight.imageCount} 项</strong>
               </span>

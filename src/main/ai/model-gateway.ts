@@ -1,4 +1,9 @@
-import type { ProviderProfile } from '../../shared/schemas'
+import {
+  DEFAULT_PROVIDER_MAX_INPUT_TOKENS,
+  DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS,
+  type ProviderProfile
+} from '../../shared/schemas'
+import { estimateModelInputTokens } from '../../shared/token-estimate'
 
 export interface ProviderSecret extends ProviderProfile {
   apiKey: string
@@ -460,7 +465,23 @@ export class ModelGateway {
     }
     if (provider.apiKey.trim()) headers.Authorization = `Bearer ${provider.apiKey.trim()}`
     const model = request.model || provider.textModel
-    let outputTokenBudget = request.maxOutputTokens ?? 4000
+    const maxInputTokens = provider.maxInputTokens ?? DEFAULT_PROVIDER_MAX_INPUT_TOKENS
+    const configuredMaxOutputTokens =
+      provider.maxOutputTokens ?? DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS
+    const estimatedInputTokens = estimateModelInputTokens(
+      request.system,
+      request.prompt,
+      request.images?.length ?? 0
+    )
+    if (estimatedInputTokens > maxInputTokens) {
+      throw new ModelGatewayError(
+        `模型输入估算为 ${estimatedInputTokens.toLocaleString()} tokens，超过当前服务上限 ${maxInputTokens.toLocaleString()}。请缩小分析范围或在模型服务设置中提高输入上限。`
+      )
+    }
+    let outputTokenBudget = Math.min(
+      request.maxOutputTokens ?? configuredMaxOutputTokens,
+      configuredMaxOutputTokens
+    )
     let budgetRetries = 0
 
     let lastError: unknown
@@ -493,7 +514,7 @@ export class ModelGateway {
                 max_tokens: outputTokenBudget,
                 ...(request.jsonMode ? { response_format: { type: 'json_object' } } : {})
               }
-        const timeoutSignal = AbortSignal.timeout(request.timeoutMs ?? 120_000)
+        const timeoutSignal = AbortSignal.timeout(request.timeoutMs ?? 600_000)
         const signal = request.signal
           ? AbortSignal.any([request.signal, timeoutSignal])
           : timeoutSignal
@@ -579,7 +600,10 @@ export class ModelGateway {
           error.code === 'max_output_tokens' &&
           budgetRetries < 2
         ) {
-          const nextBudget = Math.min(24_000, Math.max(8192, outputTokenBudget * 2))
+          const nextBudget = Math.min(
+            configuredMaxOutputTokens,
+            Math.max(8192, outputTokenBudget * 2)
+          )
           if (nextBudget > outputTokenBudget) {
             outputTokenBudget = nextBudget
             budgetRetries += 1
@@ -602,7 +626,10 @@ export class ModelGateway {
     await this.request(provider, {
       system: '你是连通性测试助手。',
       prompt: '只回复 OK。',
-      maxOutputTokens: 1024
+      maxOutputTokens: Math.min(
+        provider.maxOutputTokens ?? DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS,
+        8192
+      )
     })
     return { latencyMs: Date.now() - start }
   }

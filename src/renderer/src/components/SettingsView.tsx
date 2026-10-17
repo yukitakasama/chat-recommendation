@@ -11,7 +11,11 @@ import {
   Trash2,
   Wifi
 } from 'lucide-react'
-import type { ProviderProfile } from '../../../shared/schemas'
+import {
+  DEFAULT_PROVIDER_MAX_INPUT_TOKENS,
+  DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS,
+  type ProviderProfile
+} from '../../../shared/schemas'
 import { formatError, useAppStore } from '../store'
 import {
   Button,
@@ -33,6 +37,8 @@ interface ProviderDraft {
   apiKey: string
   textModel: string
   visionModel: string
+  maxInputTokens: number
+  maxOutputTokens: number
   isDefault: boolean
 }
 
@@ -43,6 +49,8 @@ const emptyProvider = (): ProviderDraft => ({
   apiKey: '',
   textModel: '',
   visionModel: '',
+  maxInputTokens: DEFAULT_PROVIDER_MAX_INPUT_TOKENS,
+  maxOutputTokens: DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS,
   isDefault: false
 })
 
@@ -81,6 +89,8 @@ export function SettingsView(): React.JSX.Element {
       apiKey: '',
       textModel: provider.textModel,
       visionModel: provider.visionModel,
+      maxInputTokens: provider.maxInputTokens,
+      maxOutputTokens: provider.maxOutputTokens,
       isDefault: provider.isDefault
     })
     setError('')
@@ -209,6 +219,8 @@ export function SettingsView(): React.JSX.Element {
                       {provider.protocol === 'responses' ? 'Responses API' : 'Chat Completions'} ·{' '}
                       {provider.textModel}
                       {provider.visionModel ? ` / ${provider.visionModel}` : ' / 无视觉模型'}
+                      {' · '}输入 {formatTokenLimit(provider.maxInputTokens)} / 输出{' '}
+                      {formatTokenLimit(provider.maxOutputTokens)}
                     </p>
                   </div>
                 </div>
@@ -319,7 +331,11 @@ export function SettingsView(): React.JSX.Element {
                 saving ||
                 !draft.name.trim() ||
                 !draft.baseUrl.trim() ||
-                !draft.textModel.trim()
+                !draft.textModel.trim() ||
+                !Number.isFinite(draft.maxInputTokens) ||
+                !Number.isFinite(draft.maxOutputTokens) ||
+                draft.maxInputTokens < 1 ||
+                draft.maxOutputTokens < 1
               }
               onClick={saveProvider}
             >
@@ -388,6 +404,38 @@ export function SettingsView(): React.JSX.Element {
               />
             </Field>
           </div>
+          <div className="form-grid">
+            <Field
+              label="最大输入 tokens"
+              hint="默认 350000。文本按保守规则估算，图片每张另按 1500 tokens 估算。"
+            >
+              <Input
+                type="number"
+                min={1}
+                max={2_000_000}
+                step={1000}
+                value={draft.maxInputTokens}
+                onChange={(event) =>
+                  setDraft({ ...draft, maxInputTokens: Number(event.target.value) })
+                }
+              />
+            </Field>
+            <Field
+              label="最大输出 tokens"
+              hint="默认 200000。实际可用上限仍取决于中转站和模型。"
+            >
+              <Input
+                type="number"
+                min={1}
+                max={2_000_000}
+                step={1000}
+                value={draft.maxOutputTokens}
+                onChange={(event) =>
+                  setDraft({ ...draft, maxOutputTokens: Number(event.target.value) })
+                }
+              />
+            </Field>
+          </div>
           <SwitchField
             checked={draft.isDefault}
             onCheckedChange={(checked) => setDraft({ ...draft, isDefault: checked })}
@@ -453,4 +501,8 @@ export function SettingsView(): React.JSX.Element {
       />
     </div>
   )
+}
+
+function formatTokenLimit(value: number): string {
+  return new Intl.NumberFormat('zh-CN').format(value)
 }

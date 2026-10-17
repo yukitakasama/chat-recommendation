@@ -3,6 +3,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3-multiple-ciphers'
 import { BUILT_IN_MODES, DEFAULT_PERSONA } from '../shared/defaults'
+import {
+  DEFAULT_PROVIDER_MAX_INPUT_TOKENS,
+  DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS
+} from '../shared/schemas'
 import type {
   AnalysisMode,
   AnalysisModeInput,
@@ -85,6 +89,8 @@ interface ProviderRow {
   api_key: string
   text_model: string
   vision_model: string
+  max_input_tokens: number
+  max_output_tokens: number
   is_default: number
   created_at: string
   updated_at: string
@@ -238,6 +244,8 @@ export class VaultDatabase {
         api_key TEXT NOT NULL,
         text_model TEXT NOT NULL,
         vision_model TEXT NOT NULL,
+        max_input_tokens INTEGER NOT NULL DEFAULT ${DEFAULT_PROVIDER_MAX_INPUT_TOKENS},
+        max_output_tokens INTEGER NOT NULL DEFAULT ${DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS},
         is_default INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -275,9 +283,13 @@ export class VaultDatabase {
       );
     `)
 
+    this.migrateProviderTokenLimits()
     this.db
       .prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)')
       .run(1, new Date().toISOString())
+    this.db
+      .prepare('INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)')
+      .run(2, new Date().toISOString())
     this.db
       .prepare(
         `UPDATE analysis_runs
@@ -286,6 +298,25 @@ export class VaultDatabase {
       )
       .run(new Date().toISOString())
     this.seedDefaults()
+  }
+
+  private migrateProviderTokenLimits(): void {
+    const columns = this.db.prepare('PRAGMA table_info(providers)').all() as Array<{ name: string }>
+    const names = new Set(columns.map((column) => column.name))
+    if (!names.has('max_input_tokens')) {
+      this.db
+        .prepare(
+          `ALTER TABLE providers ADD COLUMN max_input_tokens INTEGER NOT NULL DEFAULT ${DEFAULT_PROVIDER_MAX_INPUT_TOKENS}`
+        )
+        .run()
+    }
+    if (!names.has('max_output_tokens')) {
+      this.db
+        .prepare(
+          `ALTER TABLE providers ADD COLUMN max_output_tokens INTEGER NOT NULL DEFAULT ${DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS}`
+        )
+        .run()
+    }
   }
 
   private seedDefaults(): void {
@@ -680,6 +711,8 @@ export class VaultDatabase {
         baseUrl: row.base_url,
         textModel: row.text_model,
         visionModel: row.vision_model,
+        maxInputTokens: row.max_input_tokens,
+        maxOutputTokens: row.max_output_tokens,
         isDefault: Boolean(row.is_default),
         hasApiKey: Boolean(row.api_key),
         createdAt: row.created_at,
@@ -700,6 +733,8 @@ export class VaultDatabase {
       baseUrl: row.base_url,
       textModel: row.text_model,
       visionModel: row.vision_model,
+      maxInputTokens: row.max_input_tokens,
+      maxOutputTokens: row.max_output_tokens,
       isDefault: Boolean(row.is_default),
       hasApiKey: Boolean(row.api_key),
       apiKey: row.api_key,
@@ -720,7 +755,8 @@ export class VaultDatabase {
         this.db
           .prepare(
             `UPDATE providers SET name = ?, protocol = ?, base_url = ?, api_key = ?,
-             text_model = ?, vision_model = ?, is_default = ?, updated_at = ? WHERE id = ?`
+             text_model = ?, vision_model = ?, max_input_tokens = ?, max_output_tokens = ?,
+             is_default = ?, updated_at = ? WHERE id = ?`
           )
           .run(
             input.name,
@@ -729,6 +765,8 @@ export class VaultDatabase {
             input.apiKey?.trim() || existing.apiKey,
             input.textModel,
             input.visionModel,
+            input.maxInputTokens ?? DEFAULT_PROVIDER_MAX_INPUT_TOKENS,
+            input.maxOutputTokens ?? DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS,
             input.isDefault ? 1 : 0,
             now,
             input.id
@@ -740,8 +778,8 @@ export class VaultDatabase {
         .prepare(
           `INSERT INTO providers
            (id, name, protocol, base_url, api_key, text_model, vision_model,
-            is_default, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            max_input_tokens, max_output_tokens, is_default, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           id,
@@ -751,6 +789,8 @@ export class VaultDatabase {
           input.apiKey?.trim() ?? '',
           input.textModel,
           input.visionModel,
+          input.maxInputTokens ?? DEFAULT_PROVIDER_MAX_INPUT_TOKENS,
+          input.maxOutputTokens ?? DEFAULT_PROVIDER_MAX_OUTPUT_TOKENS,
           input.isDefault ? 1 : 0,
           now,
           now
