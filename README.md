@@ -75,7 +75,7 @@ ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ bun run dist
 
 - `bun run test`：加密、解析器、公共 schema 和双协议模型网关单元测试。
 - `bun run test:e2e`：真实 Electron 中建库、通过 IPC 导入、加密落盘、模拟模型分析、历史结果渲染与明文泄漏检查。
-- `bun run verify:upgrade`：使用本地 v1.3.1 与 v1.3.2 安装包验证覆盖更新后，已导入消息、隐私密码、恢复码和加密模型凭据仍然可用。
+- `bun run verify:upgrade`：使用本地 v1.3.2 与 v1.3.3 安装包验证覆盖更新后，已导入消息、隐私密码、恢复码和加密模型凭据仍然可用。
 - `bun run verify:qqchat <JSON路径>`：用真实 QQChatExporter 导出核对发送者、资源引用、贴纸映射与缺失资源告警。
 - `bun run benchmark:import`：合成 50,000 条消息和 500 张图片，验证本地解析、哈希、加密和提交耗时。
 - `bun run dist`：生成 `release` 下的便携 ZIP 与 NSIS 安装包。

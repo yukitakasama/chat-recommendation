@@ -376,3 +376,21 @@ bun x vitest run tests/unit/model-gateway.test.ts
 
 - 尚未取得 ginka 的真实失败响应，因此本轮是覆盖已复现形态的兼容性加固，不能把某一个候选原因宣称为已由线上响应确认的唯一根因。
 - 如果 ginka 返回未包含在本计划中的额外结构，应补充脱敏响应后按同一归一化器增加受控夹具，而不是扩大为任意字符串递归搜索。
+
+## 13. v1.3.3 线上反馈修复
+
+实际反馈显示，Relay 记录为非流式请求，最终错误为：
+
+- `status=incomplete`
+- `incomplete_details.reason=max_output_tokens`
+- 唯一输出项为 `reasoning`
+
+据此完成：
+
+- Responses 请求体增加 `stream: true`，Accept 优先协商 `text/event-stream`。
+- 连接测试输出预算从 16 提升到 1024，避免短测试被 reasoning 全部消耗。
+- `max_output_tokens` 被明确耗尽时，自动将预算至少提升到 8192，并最多两次按倍增预算重试，最高 24000。
+- 仅对 token 耗尽执行预算重试；其他错误仍按原有逻辑立即返回。
+- 新增流式标志、连接测试预算和 token 耗尽重试测试。
+
+该修复解决已确认的请求模式和输出预算问题。若中转站仍返回不同响应形态，需要继续提供脱敏 SSE 事件序列。

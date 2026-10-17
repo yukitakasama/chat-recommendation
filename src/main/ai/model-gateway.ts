@@ -30,7 +30,8 @@ export class ModelGatewayError extends Error {
     message: string,
     readonly status?: number,
     readonly retryable = false,
-    readonly requestId?: string
+    readonly requestId?: string,
+    readonly code?: string
   ) {
     super(message)
     this.name = 'ModelGatewayError'
@@ -224,7 +225,8 @@ function requireResponsesText(normalized: NormalizedResponsesPayload): string {
       `模型服务返回失败状态${responseDiagnostic(normalized)}`,
       undefined,
       false,
-      normalized.requestId
+      normalized.requestId,
+      normalized.errorCode ?? 'upstream_failed'
     )
   }
   if (normalized.status === 'incomplete' || normalized.incompleteReason) {
@@ -235,7 +237,10 @@ function requireResponsesText(normalized: NormalizedResponsesPayload): string {
       `模型输出未完成${reason}${responseDiagnostic(normalized)}`,
       undefined,
       false,
-      normalized.requestId
+      normalized.requestId,
+      normalized.incompleteReason === 'max_output_tokens'
+        ? 'max_output_tokens'
+        : 'incomplete'
     )
   }
   if (normalized.text.trim()) return normalized.text
@@ -287,7 +292,13 @@ function normalizeChatPayload(payload: unknown): string {
     throw new ModelGatewayError('模型只返回了推理内容，未生成最终回答')
   }
   if (nonEmptyString(choice?.finish_reason) === 'length') {
-    throw new ModelGatewayError('模型输出因长度限制被截断')
+    throw new ModelGatewayError(
+      '模型输出因长度限制被截断',
+      undefined,
+      false,
+      undefined,
+      'max_output_tokens'
+    )
   }
   if (choice?.tool_calls || choice?.function_call) {
     throw new ModelGatewayError('模型返回了工具调用，但没有生成文本回答')
@@ -444,11 +455,13 @@ export class ModelGateway {
       'Content-Type': 'application/json',
       Accept:
         provider.protocol === 'responses'
-          ? 'application/json, text/event-stream'
+          ? 'text/event-stream, application/json'
           : 'application/json'
     }
     if (provider.apiKey.trim()) headers.Authorization = `Bearer ${provider.apiKey.trim()}`
     const model = request.model || provider.textModel
+    let outputTokenBudget = request.maxOutputTokens ?? 4000
+    let budgetRetries = 0
 
     let lastError: unknown
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -467,7 +480,8 @@ export class ModelGateway {
                     content: responseContent(request)
                   }
                 ],
-                max_output_tokens: request.maxOutputTokens ?? 4000
+                max_output_tokens: outputTokenBudget,
+                stream: true
               }
             : {
                 model,
@@ -476,7 +490,7 @@ export class ModelGateway {
                   { role: 'user', content: chatContent(request) }
                 ],
                 temperature: 0.2,
-                max_tokens: request.maxOutputTokens ?? 4000,
+                max_tokens: outputTokenBudget,
                 ...(request.jsonMode ? { response_format: { type: 'json_object' } } : {})
               }
         const timeoutSignal = AbortSignal.timeout(request.timeoutMs ?? 120_000)
@@ -560,6 +574,18 @@ export class ModelGateway {
         if (error instanceof Error && error.name === 'TimeoutError') {
           throw new ModelGatewayError('模型请求超时', 408, true)
         }
+        if (
+          error instanceof ModelGatewayError &&
+          error.code === 'max_output_tokens' &&
+          budgetRetries < 2
+        ) {
+          const nextBudget = Math.min(24_000, Math.max(8192, outputTokenBudget * 2))
+          if (nextBudget > outputTokenBudget) {
+            outputTokenBudget = nextBudget
+            budgetRetries += 1
+            continue
+          }
+        }
         lastError = error
         if (attempt < 2 && error instanceof TypeError) {
           await sleep(800 * 2 ** attempt, request.signal)
@@ -576,7 +602,7 @@ export class ModelGateway {
     await this.request(provider, {
       system: '你是连通性测试助手。',
       prompt: '只回复 OK。',
-      maxOutputTokens: 16
+      maxOutputTokens: 1024
     })
     return { latencyMs: Date.now() - start }
   }

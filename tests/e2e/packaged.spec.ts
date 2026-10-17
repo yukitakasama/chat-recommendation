@@ -8,8 +8,10 @@ const packagedExecutable = path.join(process.cwd(), 'release', 'win-unpacked', '
 test('packaged x64 application loads native vault modules', async () => {
   test.skip(!fs.existsSync(packagedExecutable), 'Run bun run dist:dir before packaged smoke test')
   const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'chatinsight-packaged-'))
+  const chromiumUserData = path.join(appRoot, 'chromium-user-data')
   const electronApp = await electron.launch({
     executablePath: packagedExecutable,
+    args: [`--user-data-dir=${chromiumUserData}`],
     env: {
       ...process.env,
       CHATINSIGHT_APP_ROOT: appRoot,
@@ -19,7 +21,7 @@ test('packaged x64 application loads native vault modules', async () => {
   try {
     const page = await electronApp.firstWindow()
     const state = await page.evaluate(() => window.api.app.getState())
-    expect(state.version).toBe('1.3.2')
+    expect(state.version).toBe('1.3.3')
     await expect(page.getByRole('heading', { name: '创建加密保险库' })).toBeVisible()
     const passwordInputs = page.locator('input[type="password"]')
     await passwordInputs.nth(0).fill('PackagedTest123')

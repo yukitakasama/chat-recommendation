@@ -211,6 +211,81 @@ describe('model gateway', () => {
     expect(result.requestId).toBe('resp_sse')
   })
 
+  it('requests streaming Responses and raises the output budget after token exhaustion', async () => {
+    const budgets: number[] = []
+    const streamFlags: boolean[] = []
+    const server = http.createServer((request, response) => {
+      let body = ''
+      request.on('data', (chunk) => {
+        body += chunk
+      })
+      request.on('end', () => {
+        const payload = JSON.parse(body) as Record<string, unknown>
+        budgets.push(Number(payload.max_output_tokens))
+        streamFlags.push(payload.stream === true)
+        if (budgets.length === 1) {
+          response.setHeader('content-type', 'application/json')
+          response.end(
+            JSON.stringify({
+              id: 'resp_budget_1',
+              status: 'incomplete',
+              incomplete_details: { reason: 'max_output_tokens' },
+              output: [{ type: 'reasoning', summary: [] }]
+            })
+          )
+          return
+        }
+        response.setHeader('content-type', 'text/event-stream')
+        response.end(
+          [
+            'event: response.output_text.delta',
+            'data: {"type":"response.output_text.delta","delta":"{\\"ok\\":true}"}',
+            '',
+            'event: response.completed',
+            'data: {"type":"response.completed","response":{"id":"resp_budget_2","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\\"ok\\":true}"}]}]}}',
+            ''
+          ].join('\n')
+        )
+      })
+    })
+    const port = await listen(server)
+    const result = await new ModelGateway().request(provider(port, 'responses'), {
+      system: 'test',
+      prompt: 'hello',
+      maxOutputTokens: 64
+    })
+    expect(result.text).toBe('{"ok":true}')
+    expect(budgets).toEqual([64, 8192])
+    expect(streamFlags).toEqual([true, true])
+  })
+
+  it('uses a reasoning-safe output budget for the Responses connection test', async () => {
+    let requestedBudget = 0
+    let requestedStream = false
+    const server = http.createServer((request, response) => {
+      let body = ''
+      request.on('data', (chunk) => {
+        body += chunk
+      })
+      request.on('end', () => {
+        const payload = JSON.parse(body) as Record<string, unknown>
+        requestedBudget = Number(payload.max_output_tokens)
+        requestedStream = payload.stream === true
+        response.setHeader('content-type', 'application/json')
+        response.end(
+          JSON.stringify({
+            status: 'completed',
+            output_text: 'OK'
+          })
+        )
+      })
+    })
+    const port = await listen(server)
+    await new ModelGateway().test(provider(port, 'responses'))
+    expect(requestedBudget).toBe(1024)
+    expect(requestedStream).toBe(true)
+  })
+
   it('normalizes Chat Completions content arrays to plain text', async () => {
     const server = http.createServer((_request, response) => {
       response.setHeader('content-type', 'application/json')

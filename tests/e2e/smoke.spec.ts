@@ -304,8 +304,9 @@ ${secretText}
   const address = modelServer.address()
   if (!address || typeof address === 'string') throw new Error('Mock model server did not start')
 
+  const chromiumUserData = path.join(appRoot, 'chromium-user-data')
   const electronApp = await electron.launch({
-    args: ['.'],
+    args: [`--user-data-dir=${chromiumUserData}`, '.'],
     cwd: process.cwd(),
     env: {
       ...process.env,
